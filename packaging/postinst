@@ -24,7 +24,7 @@ for init in enigmacast-sync enigmacast-web; do
 done
 for d in /media/hdd /media/usb /media/mmc /media/cf; do
     if [ -d "$d/enigmacast-sync" ]; then
-        chown -R enigmacast:enigmacast "$d/enigmacast-sync" || true
+        chown -R enigmacast "$d/enigmacast-sync" || true
     fi
 done
 /etc/init.d/enigmacast-sync restart || true

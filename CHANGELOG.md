@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Services drop to the enigmacast user inside Python. BusyBox has that user without a matching group, and start-stop-daemon could not open /dev/null after a user switch.
+
 ## 0.2.1
 
 - The release IPK is built in the GitHub workflow without opkg-utils.

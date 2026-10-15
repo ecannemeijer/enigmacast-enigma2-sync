@@ -37,16 +37,42 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "serve-web":
         db.close()
+        _ensure_cert(data)
+        _become_service_user(data)
         from enigmacast_sync.web.server import serve as serve_web
         serve_web(data)
         return 0
     cert, key = _ensure_cert(data)
     (data / "logs").mkdir(parents=True, exist_ok=True)
+    _become_service_user(data)
     (data / "enigmacast-sync.pid").write_text(str(os.getpid()), encoding="utf-8")
     _append_log(data / "logs" / "sync.log")
     from enigmacast_sync.http_server import serve
     serve(data, cert, key)
     return 0
+
+
+def _become_service_user(data: Path) -> None:
+    """Leave root after files are in place. The init script starts Python; this process does not stay root."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    import pwd
+    try:
+        user = pwd.getpwnam("enigmacast")
+    except KeyError:
+        print("user enigmacast is missing", file=sys.stderr)
+        raise SystemExit(1)
+    for path in [data, *data.rglob("*")]:
+        try:
+            os.chown(path, user.pw_uid, user.pw_gid)
+        except OSError:
+            pass
+    try:
+        os.setgroups([])
+    except OSError:
+        pass
+    os.setgid(user.pw_gid)
+    os.setuid(user.pw_uid)
 
 
 def _append_log(path: Path) -> None:
