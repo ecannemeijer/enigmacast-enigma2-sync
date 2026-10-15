@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- The release IPK is built in the GitHub workflow without opkg-utils.
+
 ## 0.2.0
 
 - Web Manager on port 8766, in the same IPK as the Sync API and started as its own service.

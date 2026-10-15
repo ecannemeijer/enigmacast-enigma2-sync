@@ -13,11 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build package
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y opkg-utils
-          chmod +x packaging/build-ipk.sh
-          VERSION=${GITHUB_REF_NAME#v} packaging/build-ipk.sh dist
+        run: VERSION=${GITHUB_REF_NAME#v} python3 packaging/build_ipk.py dist
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.ipk

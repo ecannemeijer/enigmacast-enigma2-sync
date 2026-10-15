@@ -3,7 +3,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE=$(mktemp -d)
 OUT=${1:-$ROOT/dist}
-VERSION=${VERSION:-0.2.0}
+VERSION=${VERSION:-0.2.1}
 PKG=enigmacast-sync
 PLUGIN="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync"
 OWIF="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External"
@@ -30,7 +30,6 @@ EOF
 if command -v ipkg-build >/dev/null 2>&1; then
     ipkg-build -o root -g root "$STAGE" "$OUT"
 else
-    tar -C "$STAGE" -cf "$OUT/${PKG}_${VERSION}_all.tar" .
-    echo "Wrote $OUT/${PKG}_${VERSION}_all.tar (ipkg-build not installed)"
+    VERSION="$VERSION" python3 "$ROOT/packaging/build_ipk.py" "$OUT"
 fi
 rm -rf "$STAGE"
