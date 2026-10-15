@@ -1,0 +1,32 @@
+#!/bin/sh
+# EnigmaCast Sync only. Does not touch Enigma2, OSCam or OpenWebif settings.
+DAEMON=/usr/bin/python3
+PID=/var/run/enigmacast-sync.pid
+PLUGIN=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync
+pick_dir() {
+    for d in /media/hdd /media/usb /media/mmc /media/cf; do
+        if [ -d "$d" ] && [ -w "$d" ]; then
+            echo "$d/enigmacast-sync"
+            return 0
+        fi
+    done
+    return 1
+}
+case "$1" in
+start)
+    DIR=$(pick_dir) || { echo "No external storage"; exit 1; }
+    export PYTHONPATH="$PLUGIN"
+    start-stop-daemon -S -b -m -p "$PID" -x "$DAEMON" -- -m enigmacast_sync.cli --data-dir "$DIR" serve
+    ;;
+stop)
+    start-stop-daemon -K -p "$PID"
+    ;;
+restart)
+    "$0" stop
+    "$0" start
+    ;;
+*)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
