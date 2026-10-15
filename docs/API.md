@@ -1,5 +1,7 @@
 # API v1
 
+The Sync API is unchanged. The web dashboard on port 8766 is a separate process and does not add routes here.
+
 All paths are under `/api/v1`. Except `health`, `server`, `pair` and `recover`, every call needs:
 
 - `Authorization: Bearer <token>`

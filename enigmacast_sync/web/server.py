@@ -1,0 +1,341 @@
+"""HTTPS dashboard on port 8766. It keeps running when the Sync API is stopped."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import ssl
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from enigmacast_sync.db import backup
+from enigmacast_sync.web import PORT
+from enigmacast_sync.web.auth import (
+    check_password, clear_cookie, cookie_header, cookie_value, ensure_password, new_session, read_session, session_secret,
+)
+from enigmacast_sync.web.control import run as run_control
+from enigmacast_sync.web.lan import allowed
+from enigmacast_sync.web.queries import (
+    CpuSampler, api_listening, connect, devices, disk, memory, overview, pid_of, profile_detail, profiles, release_info,
+    synchronisation, tail, uptime_seconds,
+)
+
+STATIC = Path(__file__).resolve().parent / "static"
+ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
+PAGES = frozenset({"overview", "server", "profiles", "devices", "sync"})
+LOGS = {"sync": "sync.log", "web": "web.log"}
+
+
+def make_server(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> ThreadingHTTPServer:
+    data.mkdir(parents=True, exist_ok=True)
+    ensure_password(data)
+    secret = session_secret(data)
+    script = control_script or Path("/etc/init.d/enigmacast-sync")
+    cert, key = data / "cert.pem", data / "key.pem"
+    secure = cert.is_file() and key.is_file()
+    failures: dict[str, tuple[int, float]] = {}
+    cpu = CpuSampler()
+    handler = _handler(data, secret, secure, script, failures, cpu)
+    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd.daemon_threads = True
+    if secure:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cert), keyfile=str(key))
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    _log(data, f"listening on {port} ({'https' if secure else 'http'})")
+    (data / "enigmacast-web.pid").write_text(str(os.getpid()), encoding="utf-8")
+    return httpd
+
+
+def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> None:
+    try:
+        httpd = make_server(data, host, port, control_script)
+    except OSError as exc:
+        _log(data, f"port {port} is not available")
+        print(f"port {port} is not available: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    try:
+        httpd.serve_forever()
+    finally:
+        pid = data / "enigmacast-web.pid"
+        if pid.is_file():
+            pid.unlink(missing_ok=True)
+
+
+def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: dict, cpu: CpuSampler):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            self._route("GET")
+
+        def do_POST(self):
+            self._route("POST")
+
+        def log_message(self, fmt, *args):
+            _log(data, "%s %s" % (self.command, urlparse(self.path).path))
+
+        def _route(self, method: str):
+            if not allowed(self.client_address[0]):
+                return self._text(403, "forbidden")
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path.startswith("/static/"):
+                return self._static(path[len("/static/"):])
+            session = read_session(secret, cookie_value(self.headers.get("Cookie", "")))
+            if path == "/login" and method == "GET":
+                return self._login_page(session)
+            if path == "/login" and method == "POST":
+                return self._login(session)
+            if session is None or not session.get("auth"):
+                if path.startswith("/api/"):
+                    return self._json(401, {"error": "login required"})
+                return self._redirect("/login")
+            if method == "POST" and not self._csrf(session):
+                return self._json(403, {"error": "csrf"})
+            if path == "/logout" and method == "POST":
+                return self._logout(session)
+            if path == "/api/overview" and method == "GET":
+                return self._json(200, self._overview())
+            if path == "/api/server" and method == "GET":
+                return self._json(200, self._server_status())
+            if path == "/api/server" and method == "POST":
+                return self._server_action()
+            if path == "/api/backup" and method == "POST":
+                return self._backup()
+            if path == "/api/logs" and method == "GET":
+                which = (parse_qs(parsed.query).get("which") or ["web"])[0]
+                if which not in LOGS:
+                    return self._json(404, {"error": "not found"})
+                return self._json(200, {"lines": tail(data / "logs" / LOGS[which])})
+            if path == "/api/profiles" and method == "GET":
+                query = parse_qs(parsed.query)
+                sort = (query.get("sort") or ["name"])[0]
+                try:
+                    page = int((query.get("page") or ["1"])[0])
+                except ValueError:
+                    page = 1
+                needle = (query.get("q") or [""])[0]
+                with self._db() as db:
+                    return self._json(200, profiles(db, needle, sort, page))
+            if path.startswith("/api/profiles/") and method == "GET":
+                uuid = path[len("/api/profiles/"):]
+                if not ID_RE.fullmatch(uuid):
+                    return self._json(404, {"error": "not found"})
+                with self._db() as db:
+                    detail = profile_detail(db, uuid)
+                if detail is None:
+                    return self._json(404, {"error": "not found"})
+                return self._json(200, detail)
+            if path == "/api/devices" and method == "GET":
+                with self._db() as db:
+                    return self._json(200, {"devices": devices(db)})
+            if path == "/api/sync" and method == "GET":
+                with self._db() as db:
+                    payload = synchronisation(db)
+                payload["log"] = tail(data / "logs" / "sync.log")
+                return self._json(200, payload)
+            if path == "/api/update" and method == "GET":
+                return self._json(200, release_info())
+            if path in ("/", "/overview") and method == "GET":
+                return self._page("overview", "")
+            if path == "/server" and method == "GET":
+                return self._page("server", "")
+            if path == "/profiles" and method == "GET":
+                return self._page("profiles", "")
+            if path == "/devices" and method == "GET":
+                return self._page("devices", "")
+            if path == "/sync" and method == "GET":
+                return self._page("sync", "")
+            if path.startswith("/profiles/") and method == "GET":
+                uuid = path[len("/profiles/"):]
+                if not ID_RE.fullmatch(uuid):
+                    return self._text(404, "not found")
+                return self._page("profile", uuid)
+            return self._text(404, "not found")
+
+        def _overview(self) -> dict:
+            with self._db() as db:
+                payload = overview(db, data)
+            api_pid = pid_of(data / "enigmacast-sync.pid")
+            web_pid = os.getpid()
+            payload.update({
+                "api": api_listening() or api_pid is not None,
+                "web": True,
+                "apiUptime": uptime_seconds(api_pid),
+                "webUptime": uptime_seconds(web_pid),
+                "cpu": cpu.percent(),
+                "memory": payload.get("memory") or memory(),
+                "disk": payload.get("disk") or disk(data),
+            })
+            return payload
+
+        def _server_status(self) -> dict:
+            api_pid = pid_of(data / "enigmacast-sync.pid")
+            return {"api": api_listening() or api_pid is not None, "web": True, "port": PORT}
+
+        def _server_action(self):
+            action = str(self._body().get("action") or "")
+            try:
+                code = run_control(script, action)
+            except (ValueError, FileNotFoundError):
+                return self._json(400, {"error": "unsupported action"})
+            _log(data, f"sync {action} exit {code}")
+            return self._json(200, {"action": action, "exit": code})
+
+        def _backup(self):
+            database = data / "sync.db"
+            if not database.is_file():
+                return self._json(409, {"error": "database missing"})
+            target = backup(database, data / "master.key", data / "backups")
+            _log(data, "database backup created")
+            return self._json(200, {"path": str(target)})
+
+        def _login_page(self, session: dict | None):
+            if session and session.get("auth"):
+                return self._redirect("/overview")
+            token, csrf = new_session(secret, False)
+            page = (STATIC / "login.html").read_text(encoding="utf-8").replace("__CSRF__", csrf)
+            return self._html(200, page, cookie_header(token, secure))
+
+        def _login(self, session: dict | None):
+            ip = self.client_address[0]
+            if _locked(failures, ip):
+                return self._text(429, "too many attempts")
+            if session is None or not self._csrf(session):
+                return self._text(403, "csrf")
+            if not check_password(data, str(self._body().get("password") or "")):
+                _fail(failures, ip)
+                return self._text(401, "login failed")
+            failures.pop(ip, None)
+            token, _csrf = new_session(secret, True)
+            self.send_response(303)
+            self.send_header("Location", "/overview")
+            self.send_header("Set-Cookie", cookie_header(token, secure))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _logout(self, session: dict | None):
+            del session
+            self.send_response(303)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", clear_cookie(secure))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _page(self, page: str, identifier: str):
+            if page not in PAGES and page != "profile":
+                return self._text(404, "not found")
+            html = (STATIC / "app.html").read_text(encoding="utf-8")
+            html = html.replace("__CSRF__", str(self._session_csrf())).replace("__PAGE__", page).replace("__ID__", identifier)
+            return self._html(200, html, None)
+
+        def _session_csrf(self) -> str:
+            session = read_session(secret, cookie_value(self.headers.get("Cookie", "")))
+            return "" if session is None else str(session.get("csrf") or "")
+
+        def _csrf(self, session: dict) -> bool:
+            import hmac
+            supplied = self.headers.get("X-CSRF-Token") or str(self._body().get("csrf") or "")
+            expected = str(session.get("csrf") or "")
+            if not expected or len(expected) != len(supplied):
+                return False
+            return hmac.compare_digest(expected, supplied)
+
+        def _body(self) -> dict:
+            if hasattr(self, "_parsed_body"):
+                return self._parsed_body
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length) if length else b""
+            kind = self.headers.get("Content-Type", "")
+            if "application/json" in kind:
+                try:
+                    loaded = json.loads(raw.decode("utf-8") or "{}")
+                except json.JSONDecodeError:
+                    loaded = {}
+                self._parsed_body = loaded if isinstance(loaded, dict) else {}
+            else:
+                parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
+                self._parsed_body = {key: values[-1] for key, values in parsed.items()}
+            return self._parsed_body
+
+        def _db(self):
+            return _Database(data / "sync.db")
+
+        def _static(self, name: str):
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+                return self._text(404, "not found")
+            path = STATIC / name
+            if not path.is_file():
+                return self._text(404, "not found")
+            kind = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}.get(path.suffix, "application/octet-stream")
+            return self._bytes(200, path.read_bytes(), kind, None)
+
+        def _redirect(self, location: str):
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _html(self, status: int, page: str, cookie: str | None):
+            return self._bytes(status, page.encode("utf-8"), "text/html; charset=utf-8", cookie)
+
+        def _text(self, status: int, message: str):
+            return self._bytes(status, message.encode("utf-8"), "text/plain; charset=utf-8", None)
+
+        def _json(self, status: int, payload: dict):
+            return self._bytes(status, json.dumps(payload).encode("utf-8"), "application/json", None)
+
+        def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
+            self.end_headers()
+            self.wfile.write(payload)
+
+    return Handler
+
+
+class _Database:
+    def __init__(self, path: Path):
+        self.path = path
+        self.db = None
+
+    def __enter__(self):
+        self.db = connect(self.path)
+        return self.db
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.db is not None:
+            self.db.close()
+
+
+def _locked(failures: dict, ip: str) -> bool:
+    count, until = failures.get(ip, (0, 0.0))
+    return count >= 8 and time.time() < until
+
+
+def _fail(failures: dict, ip: str) -> None:
+    count, until = failures.get(ip, (0, 0.0))
+    if time.time() > until:
+        count = 0
+    count += 1
+    failures[ip] = (count, time.time() + 60)
+
+
+def _log(data: Path, message: str) -> None:
+    path = data / "logs" / "web.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + message + "\n")
+    except OSError:
+        return

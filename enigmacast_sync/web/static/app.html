@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__CSRF__">
+<title>EnigmaCast Sync</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-page="__PAGE__" data-id="__ID__">
+<header class="top">
+  <div>
+    <p class="brand">EnigmaCast</p>
+    <h1>Sync Server</h1>
+  </div>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf" value="__CSRF__">
+    <button type="submit" class="ghost">Uitloggen</button>
+  </form>
+</header>
+<nav>
+  <a href="/overview" data-nav="overview">Overzicht</a>
+  <a href="/server" data-nav="server">Serverbeheer</a>
+  <a href="/profiles" data-nav="profiles">Profielen</a>
+  <a href="/devices" data-nav="devices">Apparaten</a>
+  <a href="/sync" data-nav="sync">Synchronisatie</a>
+</nav>
+<main id="main"></main>
+<script src="/static/app.js"></script>
+</body>
+</html>

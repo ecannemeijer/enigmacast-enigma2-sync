@@ -4,6 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
   ipk:
     runs-on: ubuntu-latest
@@ -15,7 +18,7 @@ jobs:
           sudo apt-get install -y opkg-utils
           chmod +x packaging/build-ipk.sh
           VERSION=${GITHUB_REF_NAME#v} packaging/build-ipk.sh dist
-      - uses: actions/upload-artifact@v4
+      - uses: softprops/action-gh-release@v2
         with:
-          name: enigmacast-sync-ipk
-          path: dist/*
+          files: dist/*.ipk
+          generate_release_notes: true

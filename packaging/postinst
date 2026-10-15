@@ -1,0 +1,32 @@
+#!/bin/sh
+# Upgrade-safe. Never deletes the sync database, certificates or pairing data.
+ensure_user() {
+    if id enigmacast >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -S -D -H -s /sbin/nologin enigmacast >/dev/null 2>&1 && return 0
+        adduser -D -H -s /bin/false enigmacast >/dev/null 2>&1 && return 0
+    fi
+    if command -v useradd >/dev/null 2>&1; then
+        useradd -r -s /usr/sbin/nologin enigmacast >/dev/null 2>&1 && return 0
+    fi
+    echo "enigmacast user is missing" >&2
+    return 1
+}
+
+ensure_user || exit 1
+for init in enigmacast-sync enigmacast-web; do
+    chmod 755 "/etc/init.d/$init"
+    if command -v update-rc.d >/dev/null 2>&1; then
+        update-rc.d "$init" defaults || true
+    fi
+done
+for d in /media/hdd /media/usb /media/mmc /media/cf; do
+    if [ -d "$d/enigmacast-sync" ]; then
+        chown -R enigmacast:enigmacast "$d/enigmacast-sync" || true
+    fi
+done
+/etc/init.d/enigmacast-sync restart || true
+/etc/init.d/enigmacast-web restart || true
+exit 0

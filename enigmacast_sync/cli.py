@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("serve")
+    sub.add_parser("serve-web")
     rec = sub.add_parser("recover")
     rec.add_argument("--code", required=True)
     args = parser.parse_args(argv)
@@ -33,10 +35,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "recover":
         print(json.dumps(recover(db, args.code)))
         return 0
+    if args.cmd == "serve-web":
+        db.close()
+        from enigmacast_sync.web.server import serve as serve_web
+        serve_web(data)
+        return 0
     cert, key = _ensure_cert(data)
+    (data / "logs").mkdir(parents=True, exist_ok=True)
+    (data / "enigmacast-sync.pid").write_text(str(os.getpid()), encoding="utf-8")
+    _append_log(data / "logs" / "sync.log")
     from enigmacast_sync.http_server import serve
     serve(data, cert, key)
     return 0
+
+
+def _append_log(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a", encoding="utf-8")
+    os.dup2(handle.fileno(), 1)
+    os.dup2(handle.fileno(), 2)
 
 
 def _ensure_cert(data: Path) -> tuple[Path, Path]:

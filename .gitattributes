@@ -1,0 +1,6 @@
+*.sh text eol=lf
+packaging/enigmacast-sync text eol=lf
+packaging/enigmacast-web text eol=lf
+packaging/postinst text eol=lf
+packaging/prerm text eol=lf
+packaging/postrm text eol=lf

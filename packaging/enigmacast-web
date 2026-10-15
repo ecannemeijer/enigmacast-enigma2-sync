@@ -1,0 +1,90 @@
+#!/bin/sh
+# EnigmaCast Web Manager. Independent of the Sync API process.
+DAEMON=/usr/bin/python3
+PLUGIN=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync
+CMD=serve-web
+
+pick_dir() {
+    for d in /media/hdd /media/usb /media/mmc /media/cf; do
+        if [ -d "$d" ] && [ -w "$d" ]; then
+            echo "$d/enigmacast-sync"
+            return 0
+        fi
+    done
+    return 1
+}
+
+prepare() {
+    DIR=$(pick_dir) || { echo "No external storage"; exit 1; }
+    PID=$DIR/enigmacast-web.pid
+    mkdir -p "$DIR/logs" "$DIR/backups"
+    if [ "$(id -u)" -eq 0 ]; then
+        id enigmacast >/dev/null 2>&1 && chown -R enigmacast:enigmacast "$DIR"
+    fi
+}
+
+is_web() {
+    cmd=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true)
+    case "$cmd" in
+        *" serve-web"*) return 0 ;;
+    esac
+    return 1
+}
+
+running() {
+    [ -f "$PID" ] || return 1
+    pidn=$(cat "$PID" 2>/dev/null || true)
+    [ -n "$pidn" ] || return 1
+    [ -r "/proc/$pidn/cmdline" ] || return 1
+    is_web "$pidn"
+}
+
+stop_pid() {
+    [ -f "$PID" ] || return 0
+    pidn=$(cat "$PID" 2>/dev/null || true)
+    case "$pidn" in
+        ''|*[!0-9]*) rm -f "$PID"; return 0 ;;
+    esac
+    if [ -r "/proc/$pidn/cmdline" ] && is_web "$pidn"; then
+        kill "$pidn" 2>/dev/null || true
+        sleep 1
+        if [ -r "/proc/$pidn/cmdline" ] && is_web "$pidn"; then
+            kill -9 "$pidn" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$PID"
+}
+
+launch() {
+    id enigmacast >/dev/null 2>&1 || { echo "user enigmacast is missing"; exit 1; }
+    export PYTHONPATH="$PLUGIN"
+    if [ "$(id -u)" -eq 0 ] && command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -c enigmacast -x "$DAEMON" -- -m enigmacast_sync.cli --data-dir "$DIR" "$CMD"
+        return
+    fi
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x "$DAEMON" -- -m enigmacast_sync.cli --data-dir "$DIR" "$CMD"
+        return
+    fi
+    echo "start-stop-daemon is required"
+    exit 1
+}
+
+prepare
+case "$1" in
+start)
+    running && exit 0
+    launch
+    ;;
+stop)
+    stop_pid
+    ;;
+restart)
+    stop_pid
+    launch
+    ;;
+*)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac

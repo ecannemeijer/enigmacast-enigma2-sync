@@ -1,10 +1,10 @@
-# Enigma2 menu entry. Starts and stops the sync service only.
+# Enigma2 menu entry. Restarts the sync service only, with a fixed command and no shell.
 from Plugins.Plugin import PluginDescriptor
-import os
+import subprocess
 
 
 def main(session, **kwargs):
-    os.system("/etc/init.d/enigmacast-sync restart")
+    subprocess.run(["/etc/init.d/enigmacast-sync", "restart"], check=False)
 
 
 def Plugins(**kwargs):

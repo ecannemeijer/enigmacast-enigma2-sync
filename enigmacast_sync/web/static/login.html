@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnigmaCast Sync</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+<main class="login-card">
+  <p class="brand">EnigmaCast</p>
+  <h1>Sync Server</h1>
+  <p class="muted">Meld je aan om de ontvanger te beheren. Het wachtwoord staat niet in het programma; het is bij de installatie één keer aangemaakt.</p>
+  <form method="post" action="/login">
+    <input type="hidden" name="csrf" value="__CSRF__">
+    <label for="password">Wachtwoord</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <button type="submit">Inloggen</button>
+  </form>
+</main>
+</body>
+</html>
