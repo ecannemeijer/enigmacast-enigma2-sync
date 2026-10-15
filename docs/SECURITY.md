@@ -2,7 +2,7 @@
 
 - The Sync API is TLS only. The box generates a local certificate with `openssl`. EnigmaCast pins the certificate's public key after the install wizard has read it over SSH. There is no HTTP fallback for profiles or playlist secrets.
 - The Web Manager reuses that certificate on port 8766. If the certificate is not there yet, the dashboard serves HTTP. The browser login is separate from device pairing.
-- The dashboard password is random, stored as a PBKDF2 hash in `web-auth.json` (mode 0600). The plaintext exists only in `web-password-once` until the wizard reads and deletes it. There is no password in the source tree.
+- The dashboard password is random, stored as a PBKDF2 hash in `web-auth.json` (mode 0600 where the filesystem allows it). A fuse/NTFS disk may ignore ownership; the processes still run as the `enigmacast` user. The plaintext exists only in `web-password-once` until the wizard reads and deletes it. There is no password in the source tree.
 - Browser sessions are HMAC-signed cookies (`HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS). Management actions need the CSRF token from that session.
 - Dashboard requests from public addresses are refused. Loopback, link-local, RFC1918 and IPv6 ULA addresses are accepted, which covers the home LAN and a private VPN.
 - Device identity is an ECDSA P-256 key. The server stores the public key. Each API request is signed and carries a nonce, so a captured request cannot be replayed after the skew window.

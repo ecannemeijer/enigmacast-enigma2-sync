@@ -23,7 +23,7 @@ prepare() {
             kill "$(cat /var/run/enigmacast-sync.pid)" 2>/dev/null || true
             rm -f /var/run/enigmacast-sync.pid
         fi
-        id enigmacast >/dev/null 2>&1 && chown -R enigmacast "$DIR"
+        id enigmacast >/dev/null 2>&1 && chown -R enigmacast "$DIR" 2>/dev/null || true
     fi
 }
 

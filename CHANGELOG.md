@@ -3,6 +3,7 @@
 ## 0.2.3
 
 - Start the daemons through their own scripts. Tracking `/usr/bin/python3` also matched other Python processes, so the Web Manager never started.
+- Ignore chown failures on disks that do not store Unix owners. The services still run as enigmacast.
 
 ## 0.2.2
 

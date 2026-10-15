@@ -19,7 +19,7 @@ prepare() {
     PID=$DIR/enigmacast-web.pid
     mkdir -p "$DIR/logs" "$DIR/backups"
     if [ "$(id -u)" -eq 0 ]; then
-        id enigmacast >/dev/null 2>&1 && chown -R enigmacast "$DIR"
+        id enigmacast >/dev/null 2>&1 && chown -R enigmacast "$DIR" 2>/dev/null || true
     fi
 }
 
