@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- One IPTV login for every paired device, via GET and POST `/api/v1/playlists`. The password stays sealed in the playlist table.
+- The dashboard starts with the password admin, and the server page can change it.
+
 ## 0.2.3
 
 - Start the daemons through their own scripts. Tracking `/usr/bin/python3` also matched other Python processes, so the Web Manager never started.
