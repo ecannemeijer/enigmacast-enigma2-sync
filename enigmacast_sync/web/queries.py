@@ -29,7 +29,7 @@ def overview(db: sqlite3.Connection | None, data: Path) -> dict:
     profiles = devices = 0
     last = None
     if db is not None:
-        profiles = db.execute("SELECT COUNT(*) AS n FROM profiles WHERE deleted=0").fetchone()["n"]
+        profiles = len(_profile_rows(db))
         devices = db.execute("SELECT COUNT(*) AS n FROM devices").fetchone()["n"]
         last = db.execute("SELECT MAX(updated_ms) AS ms FROM changes").fetchone()["ms"]
     database = data / "sync.db"
@@ -71,7 +71,14 @@ def profile_detail(db: sqlite3.Connection | None, uuid: str) -> dict | None:
         (uuid,),
     ).fetchone()
     if row is None:
-        return None
+        removed = db.execute("SELECT 1 FROM profiles WHERE uuid=? AND deleted=1", (uuid,)).fetchone()
+        used = db.execute(
+            "SELECT 1 FROM records WHERE profile_id=? UNION SELECT 1 FROM changes WHERE profile_id=? LIMIT 1",
+            (uuid, uuid),
+        ).fetchone()
+        if removed is not None or used is None:
+            return None
+        row = {"uuid": uuid, "name": uuid, "avatar": 0, "language": None, "updated_ms": None}
     items = []
     for record in db.execute(
         "SELECT entity, record_key, payload, updated_ms, deleted FROM records WHERE profile_id=?",
@@ -288,12 +295,38 @@ def _profile_rows(db: sqlite3.Connection | None) -> list[dict]:
         elif kind in ("s", "e"):
             bucket["episodes"] += 1
     rows = []
-    for profile in db.execute("SELECT uuid, name, updated_ms FROM profiles WHERE deleted=0"):
+    seen: set[str] = set()
+    removed: set[str] = set()
+    for profile in db.execute("SELECT uuid, name, updated_ms, deleted FROM profiles"):
+        if profile["deleted"]:
+            removed.add(profile["uuid"])
+            continue
+        seen.add(profile["uuid"])
         bucket = counts.get(profile["uuid"], {"favorites": 0, "vod": 0, "episodes": 0})
         rows.append({
             "uuid": profile["uuid"],
             "name": profile["name"],
             "updated": profile["updated_ms"],
+            "favorites": bucket["favorites"],
+            "vod": bucket["vod"],
+            "episodes": bucket["episodes"],
+            "watchHistory": None,
+        })
+    extras: set[str] = set()
+    for row in db.execute("SELECT DISTINCT profile_id AS id FROM records UNION SELECT DISTINCT profile_id AS id FROM changes"):
+        ident = str(row["id"] or "")
+        if ident and ident != "*" and ident not in seen and ident not in removed:
+            extras.add(ident)
+    for ident in sorted(extras):
+        bucket = counts.get(ident, {"favorites": 0, "vod": 0, "episodes": 0})
+        updated = db.execute(
+            "SELECT MAX(updated_ms) AS ms FROM records WHERE profile_id=?",
+            (ident,),
+        ).fetchone()["ms"]
+        rows.append({
+            "uuid": ident,
+            "name": ident,
+            "updated": updated,
             "favorites": bucket["favorites"],
             "vod": bucket["vod"],
             "episodes": bucket["episodes"],

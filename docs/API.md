@@ -20,7 +20,8 @@ All paths are under `/api/v1`. Except `health`, `server`, `pair` and `recover`, 
 | POST | `/devices/revoke` | admin | Revoke another device |
 | POST | `/devices/profiles` | admin | Assign profile uuids to a member |
 | POST | `/profiles` | admin or assigned | Create or update a profile |
-| POST | `/playlists` | admin | Store a playlist; the password is sealed |
+| GET | `/playlists` | any paired device | The one IPTV login (M3U or Xtream), not tied to a profile |
+| POST | `/playlists` | any paired device | Store that login when it is newer; the password is sealed |
 | POST | `/sync/push` | admin or assigned | Apply changes that are newer |
 | GET | `/sync/pull?profileId&cursor` | admin or assigned | Changes after the cursor |
 | POST | `/backups` | admin | Snapshot the database and the key file |

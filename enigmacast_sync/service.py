@@ -227,11 +227,11 @@ def upsert_profile(db, device: dict, body: dict) -> dict:
 
 
 def put_playlist(db, device: dict, body: dict) -> dict:
-    require_admin(device)
+    """One IPTV login for every paired device. Not stored per profile, so a profile switch does not reload it."""
     change = str(body["changeId"])
     updated = int(body["updatedMs"])
     key = master_key(_dir(db) / "master.key")
-    sealed = seal(key, json.dumps({k: body.get(k, "") for k in ("m3uUrl", "server", "username", "password")}))
+    sealed = seal(key, json.dumps({k: body.get(k, "") for k in ("m3uUrl", "server", "username", "password", "kind")}))
     audience = json.dumps(body.get("audience") or [])
     choice = apply_record(db, "*", "playlist", body.get("id") or "default", "upsert", audience, updated, change, device["id"])
     if choice == "accept":
@@ -243,6 +243,25 @@ def put_playlist(db, device: dict, body: dict) -> dict:
         )
     db.commit()
     return {"result": choice}
+
+
+def get_playlist(db, device: dict) -> dict:
+    """The device-wide IPTV login, decrypted for any paired device. Null when nobody stored one."""
+    del device
+    row = db.execute("SELECT * FROM playlist WHERE id=? AND deleted=0", ("default",)).fetchone()
+    if row is None:
+        return {"playlist": None}
+    raw = json.loads(open_secret(master_key(_dir(db) / "master.key"), row["secret"]))
+    return {"playlist": {
+        "id": row["id"],
+        "m3uUrl": raw.get("m3uUrl", ""),
+        "server": raw.get("server", ""),
+        "username": raw.get("username", ""),
+        "password": raw.get("password", ""),
+        "kind": raw.get("kind", ""),
+        "updatedMs": row["updated_ms"],
+        "changeId": row["change_id"],
+    }}
 
 
 def push(db, device: dict, body: dict) -> dict:

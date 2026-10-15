@@ -39,6 +39,7 @@ button, input, select {
 h1 { margin: 0.15rem 0 0; font-size: 1.7rem; font-weight: 650; }
 h2 { margin: 0 0 0.8rem; font-size: 1.15rem; }
 .muted { color: var(--muted); }
+.error { color: var(--danger); }
 .subtle { color: var(--subtle); }
 
 .top, nav, #main, .login-card { width: min(1120px, calc(100% - 2rem)); margin-left: auto; margin-right: auto; }
@@ -99,7 +100,7 @@ pre {
 }
 .login-body { display: grid; place-items: center; }
 .login-card { margin: 8vh auto; padding: 1.5rem; }
-.login-card form { display: grid; gap: 0.55rem; margin-top: 1rem; }
+.login-card form, .password-form { display: grid; gap: 0.55rem; margin-top: 1rem; max-width: 420px; }
 .pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; }
 .empty { color: var(--muted); padding: 0.6rem 0; }
 @media (max-width: 720px) {

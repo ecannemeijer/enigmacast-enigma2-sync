@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -15,7 +16,8 @@ from urllib.parse import parse_qs, urlparse
 from enigmacast_sync.db import backup
 from enigmacast_sync.web import PORT
 from enigmacast_sync.web.auth import (
-    check_password, clear_cookie, cookie_header, cookie_value, ensure_password, new_session, read_session, session_secret,
+    check_password, clear_cookie, cookie_header, cookie_value, ensure_password, new_session, read_session,
+    session_secret, set_password,
 )
 from enigmacast_sync.web.control import run as run_control
 from enigmacast_sync.web.lan import allowed
@@ -33,7 +35,7 @@ LOGS = {"sync": "sync.log", "web": "web.log"}
 def make_server(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> ThreadingHTTPServer:
     data.mkdir(parents=True, exist_ok=True)
     ensure_password(data)
-    secret = session_secret(data)
+    secret = {"value": session_secret(data)}
     script = control_script or Path("/etc/init.d/enigmacast-sync")
     cert, key = data / "cert.pem", data / "key.pem"
     secure = cert.is_file() and key.is_file()
@@ -66,7 +68,7 @@ def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: P
             pid.unlink(missing_ok=True)
 
 
-def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: dict, cpu: CpuSampler):
+def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dict, cpu: CpuSampler):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -86,7 +88,9 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
             path = parsed.path
             if path.startswith("/static/"):
                 return self._static(path[len("/static/"):])
-            session = read_session(secret, cookie_value(self.headers.get("Cookie", "")))
+            if method == "POST":
+                self._body()
+            session = read_session(secret["value"], cookie_value(self.headers.get("Cookie", "")))
             if path == "/login" and method == "GET":
                 return self._login_page(session)
             if path == "/login" and method == "POST":
@@ -107,6 +111,8 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
                 return self._server_action()
             if path == "/api/backup" and method == "POST":
                 return self._backup()
+            if path == "/api/password" and method == "POST":
+                return self._change_password()
             if path == "/api/logs" and method == "GET":
                 which = (parse_qs(parsed.query).get("which") or ["web"])[0]
                 if which not in LOGS:
@@ -176,7 +182,12 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
 
         def _server_status(self) -> dict:
             api_pid = pid_of(data / "enigmacast-sync.pid")
-            return {"api": api_listening() or api_pid is not None, "web": True, "port": PORT}
+            return {
+                "api": api_listening() or api_pid is not None,
+                "web": True,
+                "port": PORT,
+                "defaultPassword": check_password(data, "admin"),
+            }
 
         def _server_action(self):
             action = str(self._body().get("action") or "")
@@ -187,6 +198,26 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
             _log(data, f"sync {action} exit {code}")
             return self._json(200, {"action": action, "exit": code})
 
+        def _change_password(self):
+            body = self._body()
+            current = str(body.get("current") or "")
+            chosen = str(body.get("password") or "")
+            confirm = str(body.get("confirm") or "")
+            if not check_password(data, current):
+                return self._json(400, {"error": "Het huidige wachtwoord klopt niet."})
+            if len(chosen) < 4:
+                return self._json(400, {"error": "Kies minstens 4 tekens."})
+            if chosen != confirm:
+                return self._json(400, {"error": "De nieuwe wachtwoorden zijn niet gelijk."})
+            set_password(data, chosen)
+            renewed = data / "web.secret"
+            if renewed.is_file():
+                renewed.unlink()
+            secret["value"] = session_secret(data)
+            token, _csrf = new_session(secret["value"], True)
+            _log(data, "dashboard password changed")
+            return self._json(200, {"ok": True}, cookie_header(token, secure))
+
         def _backup(self):
             database = data / "sync.db"
             if not database.is_file():
@@ -195,29 +226,42 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
             _log(data, "database backup created")
             return self._json(200, {"path": str(target)})
 
-        def _login_page(self, session: dict | None):
-            if session and session.get("auth"):
+        def _login_page(self, session: dict | None, message: str = "", status: int = 200):
+            if session and session.get("auth") and not message:
                 return self._redirect("/overview")
-            token, csrf = new_session(secret, False)
-            page = (STATIC / "login.html").read_text(encoding="utf-8").replace("__CSRF__", csrf)
-            return self._html(200, page, cookie_header(token, secure))
+            token, _csrf = new_session(secret["value"], False, login=True)
+            page = (STATIC / "login.html").read_text(encoding="utf-8")
+            page = page.replace("__CSRF__", html.escape(token, quote=True))
+            error = f'<p class="error">{html.escape(message)}</p>' if message else ""
+            page = page.replace("__ERROR__", error)
+            return self._html(status, page, cookie_header(token, secure))
 
         def _login(self, session: dict | None):
             ip = self.client_address[0]
             if _locked(failures, ip):
-                return self._text(429, "too many attempts")
-            if session is None or not self._csrf(session):
-                return self._text(403, "csrf")
+                return self._login_page(None, "Te veel pogingen. Wacht een minuut en probeer opnieuw.", 429)
+            posted = str(self._body().get("csrf") or "")
+            if not self._login_trusted(session, posted):
+                return self._login_page(None, "De aanmelding is verlopen. Vernieuw de pagina en probeer opnieuw.", 403)
             if not check_password(data, str(self._body().get("password") or "")):
                 _fail(failures, ip)
-                return self._text(401, "login failed")
+                return self._login_page(None, "Onjuist wachtwoord.", 401)
             failures.pop(ip, None)
-            token, _csrf = new_session(secret, True)
+            token, _csrf = new_session(secret["value"], True)
             self.send_response(303)
             self.send_header("Location", "/overview")
             self.send_header("Set-Cookie", cookie_header(token, secure))
             self.send_header("Content-Length", "0")
             self.end_headers()
+
+        def _login_trusted(self, session: dict | None, posted: str) -> bool:
+            challenge = read_session(secret["value"], posted)
+            if challenge is not None and challenge.get("login") and not challenge.get("auth"):
+                return True
+            site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+            if site in ("cross-site", "same-site"):
+                return False
+            return bool(session) and not session.get("auth") and bool(session.get("csrf"))
 
         def _logout(self, session: dict | None):
             del session
@@ -235,7 +279,7 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
             return self._html(200, html, None)
 
         def _session_csrf(self) -> str:
-            session = read_session(secret, cookie_value(self.headers.get("Cookie", "")))
+            session = read_session(secret["value"], cookie_value(self.headers.get("Cookie", "")))
             return "" if session is None else str(session.get("csrf") or "")
 
         def _csrf(self, session: dict) -> bool:
@@ -287,8 +331,8 @@ def _handler(data: Path, secret: bytes, secure: bool, script: Path, failures: di
         def _text(self, status: int, message: str):
             return self._bytes(status, message.encode("utf-8"), "text/plain; charset=utf-8", None)
 
-        def _json(self, status: int, payload: dict):
-            return self._bytes(status, json.dumps(payload).encode("utf-8"), "application/json", None)
+        def _json(self, status: int, payload: dict, cookie: str | None = None):
+            return self._bytes(status, json.dumps(payload).encode("utf-8"), "application/json", cookie)
 
         def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None):
             self.send_response(status)

@@ -8,7 +8,7 @@ from enigmacast_sync.aes import decrypt, encrypt
 from enigmacast_sync.db import decide
 from enigmacast_sync.p256 import generate, sign, verify
 from enigmacast_sync.service import (
-    ApiError, authenticate, init_server, issue_pairing, join, open_db, pair, push, recover, revoke_device,
+    ApiError, authenticate, get_playlist, init_server, issue_pairing, join, open_db, pair, push, put_playlist, recover, revoke_device,
 )
 from enigmacast_sync.storage import choose_data_dir
 
@@ -126,6 +126,37 @@ class ServerTests(unittest.TestCase):
         root = Path(self.tmp.name) / "hdd"
         root.mkdir()
         self.assertEqual(root / "enigmacast-sync", choose_data_dir([root]))
+
+    def test_playlist_is_one_login_for_every_device(self):
+        created = init_server(self.db)
+        _, public = generate()
+        admin = pair(self.db, {"code": created["pairingCode"], "name": "tv", "publicKey": base64.b64encode(public).decode()})
+        auth = {"id": admin["deviceId"], "role": "admin", "revoked": 0}
+        self.assertIsNone(get_playlist(self.db, auth)["playlist"])
+        stored = put_playlist(self.db, auth, {
+            "changeId": "c1", "updatedMs": 10, "server": "http://tv", "username": "u", "password": "p", "kind": "XTREAM",
+        })
+        self.assertEqual("accept", stored["result"])
+        got = get_playlist(self.db, auth)["playlist"]
+        self.assertEqual("p", got["password"])
+        self.assertEqual("XTREAM", got["kind"])
+        self.assertNotIn("profile", got)
+        older = put_playlist(self.db, auth, {
+            "changeId": "c0", "updatedMs": 5, "server": "http://tv", "username": "u", "password": "old", "kind": "XTREAM",
+        })
+        self.assertEqual("reject", older["result"])
+        self.assertEqual("p", get_playlist(self.db, auth)["playlist"]["password"])
+        issued = issue_pairing(self.db, auth)
+        _, other = generate()
+        member = pair(self.db, {"code": issued["pairingCode"], "name": "bedroom", "publicKey": base64.b64encode(other).decode()})
+        member_auth = {"id": member["deviceId"], "role": "member", "revoked": 0}
+        newer = put_playlist(self.db, member_auth, {
+            "changeId": "c2", "updatedMs": 20, "m3uUrl": "https://list.example/tv.m3u", "kind": "M3U",
+        })
+        self.assertEqual("accept", newer["result"])
+        again = get_playlist(self.db, auth)["playlist"]
+        self.assertEqual("https://list.example/tv.m3u", again["m3uUrl"])
+        self.assertEqual("M3U", again["kind"])
 
     def test_p256_roundtrip(self):
         private, public = generate()

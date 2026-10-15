@@ -20,7 +20,13 @@
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf, "Accept": "application/json" },
       body: JSON.stringify(body || {})
     }).then(function (response) {
-      return response.json().then(function (payload) {
+      return response.text().then(function (text) {
+        var payload;
+        try {
+          payload = JSON.parse(text);
+        } catch (error) {
+          throw new Error("De server gaf geen geldig antwoord. Vernieuw de pagina en probeer opnieuw.");
+        }
         if (!response.ok) throw new Error(payload.error || "request failed");
         return payload;
       });
@@ -88,11 +94,20 @@
     main.innerHTML = '<section class="panel"><h2>Sync API</h2><p id="api-state" class="muted">Status laden…</p>' +
       '<div class="actions"><button data-action="start">Start</button><button data-action="stop">Stop</button><button data-action="restart">Restart</button>' +
       '<button id="backup" class="ghost">Databaseback-up</button></div><p id="action-result" class="muted"></p></section>' +
+      '<section class="panel"><h2>Wachtwoord</h2><p id="password-hint" class="muted"></p>' +
+      '<form id="password-form" class="password-form">' +
+      '<label for="pw-current">Huidig wachtwoord</label><input id="pw-current" type="password" autocomplete="current-password" required>' +
+      '<label for="pw-new">Nieuw wachtwoord</label><input id="pw-new" type="password" autocomplete="new-password" required minlength="4">' +
+      '<label for="pw-again">Herhaal nieuw wachtwoord</label><input id="pw-again" type="password" autocomplete="new-password" required minlength="4">' +
+      '<button type="submit">Wachtwoord wijzigen</button></form><p id="pw-result" class="muted"></p></section>' +
       '<section class="panel"><h2>Versie</h2><p id="version" class="muted">Release-informatie laden…</p></section>' +
       '<section class="panel"><h2>Logs</h2><div class="actions"><button id="log-sync" class="ghost">Sync API</button><button id="log-web" class="ghost">Web Manager</button></div><pre id="log"></pre></section>';
     function refresh() {
       get("/api/server").then(function (data) {
         document.getElementById("api-state").innerHTML = "Sync API is " + status(data.api) + ". Web Manager is " + status(data.web) + " op poort " + esc(data.port) + ".";
+        document.getElementById("password-hint").textContent = data.defaultPassword
+          ? "Het wachtwoord is nog admin. Kies hier een eigen wachtwoord."
+          : "Het dashboardwachtwoord geldt alleen voor deze webpagina.";
       });
     }
     function showLog(which) {
@@ -116,6 +131,27 @@
         document.getElementById("action-result").textContent = "Back-up op de ontvanger: " + result.path;
       }).catch(function () {
         document.getElementById("action-result").textContent = "Back-up is niet gemaakt.";
+      });
+    });
+    document.getElementById("password-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      var chosen = document.getElementById("pw-new").value;
+      var again = document.getElementById("pw-again").value;
+      var result = document.getElementById("pw-result");
+      if (chosen !== again) {
+        result.textContent = "De nieuwe wachtwoorden zijn niet gelijk.";
+        return;
+      }
+      post("/api/password", {
+        current: document.getElementById("pw-current").value,
+        password: chosen,
+        confirm: again
+      }).then(function () {
+        document.getElementById("password-form").reset();
+        result.textContent = "Het wachtwoord is gewijzigd.";
+        refresh();
+      }).catch(function (error) {
+        result.textContent = error.message || "Het wachtwoord is niet gewijzigd.";
       });
     });
     document.getElementById("log-sync").addEventListener("click", function () { showLog("sync"); });

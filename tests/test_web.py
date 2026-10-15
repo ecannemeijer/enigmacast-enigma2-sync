@@ -37,6 +37,7 @@ class AuthTests(unittest.TestCase):
             data = Path(tmp)
             ensure_password(data)
             password = (data / "web-password-once").read_text(encoding="utf-8").strip()
+            self.assertEqual("admin", password)
             self.assertTrue(check_password(data, password))
             self.assertFalse(check_password(data, "wrong"))
             secret = session_secret(data)
@@ -82,6 +83,13 @@ class QueryTests(unittest.TestCase):
             )
             db.commit()
             found = profiles(db, "ada", "favorites", 1)["profiles"]
+            db.execute(
+                "INSERT INTO records (profile_id, entity, record_key, payload, updated_ms, change_id, deleted) VALUES (?,?,?,?,?,?,0)",
+                ("orphan", "favorite", "c", json.dumps({"title": "Film"}), 40, "g2"),
+            )
+            db.commit()
+            listed = [row["uuid"] for row in profiles(db, "", "name", 1)["profiles"]]
+            self.assertIn("orphan", listed)
             self.assertEqual("Ada", found[0]["name"])
             self.assertEqual(1, found[0]["favorites"])
             self.assertEqual(1, found[0]["episodes"])
@@ -137,9 +145,26 @@ class DashboardTests(unittest.TestCase):
                 opener.open("http://127.0.0.1:%s/login" % port, data=good, timeout=3)
                 overview = json.loads(opener.open("http://127.0.0.1:%s/api/overview" % port, timeout=3).read())
                 self.assertEqual(1, overview["profiles"])
+                server_page = opener.open("http://127.0.0.1:%s/server" % port, timeout=3).read().decode("utf-8")
+                token = re.search(r'csrf-token" content="([^"]+)"', server_page).group(1)
+                changed = json.dumps({"current": password, "password": "nieuw", "confirm": "nieuw"}).encode()
+                opener.open(urllib.request.Request(
+                    "http://127.0.0.1:%s/api/password" % port,
+                    data=changed,
+                    headers={"Content-Type": "application/json", "X-CSRF-Token": token},
+                ), timeout=3)
+                self.assertTrue(check_password(data, "nieuw"))
                 self.assertTrue(overview["web"])
                 page = opener.open("http://127.0.0.1:%s/profiles" % port, timeout=3).read().decode("utf-8")
                 self.assertIn('data-page="profiles"', page)
+                fresh = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+                form = fresh.open("http://127.0.0.1:%s/login" % port, timeout=3).read().decode("utf-8")
+                token = re.search(r'name="csrf" value="([^"]+)"', form).group(1)
+                bare = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+                posted = urllib.parse.urlencode({"csrf": token, "password": "nieuw"}).encode()
+                bare.open("http://127.0.0.1:%s/login" % port, data=posted, timeout=3)
+                again = json.loads(bare.open("http://127.0.0.1:%s/api/overview" % port, timeout=3).read())
+                self.assertEqual(1, again["profiles"])
                 action = json.dumps({"action": "start"}).encode()
                 request = urllib.request.Request(
                     "http://127.0.0.1:%s/api/server" % port,
