@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Start the daemons through their own scripts. Tracking `/usr/bin/python3` also matched other Python processes, so the Web Manager never started.
+
 ## 0.2.2
 
 - Services drop to the enigmacast user inside Python. BusyBox has that user without a matching group, and start-stop-daemon could not open /dev/null after a user switch.

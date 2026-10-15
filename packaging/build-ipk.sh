@@ -3,7 +3,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE=$(mktemp -d)
 OUT=${1:-$ROOT/dist}
-VERSION=${VERSION:-0.2.2}
+VERSION=${VERSION:-0.2.3}
 PKG=enigmacast-sync
 PLUGIN="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync"
 OWIF="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External"
@@ -13,6 +13,9 @@ cp "$ROOT/plugin/plugin.py" "$PLUGIN/plugin.py"
 cp "$ROOT/plugin/owif/enigmacast.py" "$OWIF/enigmacast.py"
 cp "$ROOT/packaging/enigmacast-sync" "$STAGE/etc/init.d/enigmacast-sync"
 cp "$ROOT/packaging/enigmacast-web" "$STAGE/etc/init.d/enigmacast-web"
+cp "$ROOT/packaging/sync-run" "$PLUGIN/sync-run"
+cp "$ROOT/packaging/web-run" "$PLUGIN/web-run"
+chmod 755 "$PLUGIN/sync-run" "$PLUGIN/web-run"
 cp "$ROOT/packaging/postinst" "$STAGE/CONTROL/postinst"
 cp "$ROOT/packaging/prerm" "$STAGE/CONTROL/prerm"
 cp "$ROOT/packaging/postrm" "$STAGE/CONTROL/postrm"

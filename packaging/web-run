@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync
+exec /usr/bin/python3 -m enigmacast_sync.cli --data-dir "$1" serve-web

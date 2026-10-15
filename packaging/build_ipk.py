@@ -16,7 +16,7 @@ PKG = "enigmacast-sync"
 
 def main() -> None:
     import sys
-    version = os.environ.get("VERSION", "0.2.2")
+    version = os.environ.get("VERSION", "0.2.3")
     out = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist")
     out.mkdir(parents=True, exist_ok=True)
     stage = _stage(version)
@@ -43,6 +43,10 @@ def _stage(version: str) -> dict[str, tuple[bytes, int]]:
     files["usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/plugin.py"] = (
         (ROOT / "plugin" / "plugin.py").read_bytes(), 0o644,
     )
+    for name in ("sync-run", "web-run"):
+        files[f"usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/{name}"] = (
+            (ROOT / "packaging" / name).read_bytes().replace(b"\r\n", b"\n"), 0o755,
+        )
     files["usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/enigmacast.py"] = (
         (ROOT / "plugin" / "owif" / "enigmacast.py").read_bytes(), 0o644,
     )

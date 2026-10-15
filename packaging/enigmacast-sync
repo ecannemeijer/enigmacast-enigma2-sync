@@ -61,11 +61,24 @@ stop_pid() {
     rm -f "$PID"
 }
 
+stop_matches() {
+    for proc in /proc/[0-9]*; do
+        pidn=${proc#/proc/}
+        [ -r "$proc/cmdline" ] || continue
+        cmd=$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null || true)
+        case "$cmd" in
+            *serve-web*) continue ;;
+        esac
+        case "$cmd" in
+            *enigmacast_sync.cli*) kill "$pidn" 2>/dev/null || true ;;
+        esac
+    done
+}
+
 launch() {
     id enigmacast >/dev/null 2>&1 || { echo "user enigmacast is missing"; exit 1; }
-    export PYTHONPATH="$PLUGIN"
     if command -v start-stop-daemon >/dev/null 2>&1; then
-        start-stop-daemon -S -b -x "$DAEMON" -- -m enigmacast_sync.cli --data-dir "$DIR" "$CMD"
+        start-stop-daemon -S -b -m -p "$PID" -x "$PLUGIN/sync-run" -- "$DIR"
         return
     fi
     echo "start-stop-daemon is required"
@@ -76,13 +89,17 @@ prepare
 case "$1" in
 start)
     running && exit 0
+    rm -f "$PID"
     launch
     ;;
 stop)
     stop_pid
+    stop_matches
     ;;
 restart)
     stop_pid
+    stop_matches
+    sleep 1
     launch
     ;;
 *)
