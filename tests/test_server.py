@@ -122,7 +122,7 @@ class ServerTests(unittest.TestCase):
         key = b"k" * 32
         blob = encrypt(key, b"secret-pass")
         self.assertEqual(b"secret-pass", decrypt(key, blob))
-        self.assertIsNone(choose_data_dir([]))
+        self.assertEqual(Path("/etc/enigmacast-sync"), choose_data_dir([]))
         root = Path(self.tmp.name) / "hdd"
         root.mkdir()
         self.assertEqual(root / "enigmacast-sync", choose_data_dir([root]))

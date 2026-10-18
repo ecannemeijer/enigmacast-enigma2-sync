@@ -24,9 +24,6 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("--code", required=True)
     args = parser.parse_args(argv)
     data = Path(args.data_dir) if args.data_dir else choose_data_dir()
-    if data is None:
-        print("No external storage found. Refusing to put the database on internal flash.", file=sys.stderr)
-        return 2
     db = open_db(data)
     if args.cmd == "init":
         _ensure_cert(data)

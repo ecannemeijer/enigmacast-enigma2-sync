@@ -22,7 +22,7 @@ opkg install enigmacast-sync_<version>_all.ipk
 
 Build that IPK with `packaging/build-ipk.sh`. A tag `v*` publishes one `all` package, which is the only architecture variant: the server is pure Python.
 
-Confirm a writable `/media/hdd`, `/media/usb`, `/media/mmc` or `/media/cf`. Then:
+A mounted `/media/hdd`, `/media/usb`, `/media/mmc` or `/media/cf` is used when present. Otherwise the data directory is `/etc/enigmacast-sync`. Then:
 
 ```sh
 python3 -m enigmacast_sync.cli --data-dir /media/hdd/enigmacast-sync init

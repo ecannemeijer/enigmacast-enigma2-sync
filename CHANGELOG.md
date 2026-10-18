@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Data stays on a mounted disk (`/media/hdd`, then USB, MMC, CF). An empty mount folder on the internal flash is ignored. With no disk, the database is stored in `/etc/enigmacast-sync` so a receiver without a hard drive can still run the server.
+
 ## 0.2.4
 
 - One IPTV login for every paired device, via GET and POST `/api/v1/playlists`. The password stays sealed in the playlist table.

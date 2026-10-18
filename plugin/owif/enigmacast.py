@@ -22,7 +22,7 @@ def _register():
             request.finish()
             return server.NOT_DONE_YET
 
-    addExternalChild(("enigmacast", Page(), "EnigmaCast Sync Server", "0.2.4", True, "_blank"))
+    addExternalChild(("enigmacast", Page(), "EnigmaCast Sync Server", "0.2.5", True, "_blank"))
 
 
 _register()

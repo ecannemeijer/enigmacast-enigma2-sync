@@ -7,7 +7,7 @@ HTTPS API for EnigmaCast profiles, favorites, watch progress and playlists, plus
 | Sync API | 8740 | `/etc/init.d/enigmacast-sync` |
 | Web Manager | 8766 | `/etc/init.d/enigmacast-web` |
 
-The database goes on external storage (`/media/hdd`, then USB, then other disks). If none is writable the services refuse to start, so they do not wear the internal flash. The Web Manager keeps serving when the Sync API is stopped.
+The database goes on a mounted disk (`/media/hdd`, then USB, then other disks). An empty `/media/hdd` folder on the internal flash does not count. With no disk the data is stored in `/etc/enigmacast-sync`, so a receiver without a hard drive can still run the server. The Web Manager keeps serving when the Sync API is stopped.
 
 The dashboard password starts as `admin` and is written once to `web-password-once` in the data directory. Change it on the Server page. An existing password hash is kept.
 

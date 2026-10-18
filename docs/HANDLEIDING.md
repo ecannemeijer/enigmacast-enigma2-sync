@@ -13,7 +13,7 @@ De installatie wijzigt geen zenders, bouquets, tuners, OSCam of streaminginstell
 
 De webpagina blijft bereikbaar als de Sync API gestopt is. De Sync API blijft werken als de webpagina gestopt is.
 
-Gegevens staan op de eerste schrijfbare schijf, in deze volgorde: `/media/hdd`, `/media/usb`, `/media/mmc`, `/media/cf`. De map heet `enigmacast-sync`. Is geen van die schijven schrijfbaar, dan starten de diensten niet. Ze schrijven niet naar het interne flashgeheugen.
+Gegevens staan op de eerste echt gemounte schijf, in deze volgorde: `/media/hdd`, `/media/usb`, `/media/mmc`, `/media/cf`. De map heet `enigmacast-sync`. Een lege map `/media/hdd` op de interne flash telt niet. Zonder schijf komen de gegevens in `/etc/enigmacast-sync`, zodat een ontvanger zonder harde schijf de server ook kan draaien.
 
 Beide processen draaien als de systeemgebruiker `enigmacast`, niet als root.
 

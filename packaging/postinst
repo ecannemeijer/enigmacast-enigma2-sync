@@ -22,7 +22,7 @@ for init in enigmacast-sync enigmacast-web; do
         update-rc.d "$init" defaults || true
     fi
 done
-for d in /media/hdd /media/usb /media/mmc /media/cf; do
+for d in /media/hdd /media/usb /media/mmc /media/cf /etc; do
     if [ -d "$d/enigmacast-sync" ]; then
         chown -R enigmacast "$d/enigmacast-sync" 2>/dev/null || true
     fi
