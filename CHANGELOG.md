@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.6
+
+- `/api/v1/sync/pull` returns bounded pages (default 500, client asks 50) instead of the entire change history. A large single TLS response could be dropped with `BrokenPipe`/`SSL BAD_LENGTH`, so the TV never applied it.
+- Per-device/profile cursors are recorded when a client pulls. History already applied by every active device is pruned, keeping the newest 2,000 changes per profile. Devices unseen for 90 days no longer hold pruning back.
+- Large prunes compact the SQLite database with `VACUUM`, so removed history also releases disk space.
+- Added optional `limit` to `/api/v1/sync/pull` (`1`–`1000`).
+
 ## 0.2.5
 
 - Data stays on a mounted disk (`/media/hdd`, then USB, MMC, CF). An empty mount folder on the internal flash is ignored. With no disk, the database is stored in `/etc/enigmacast-sync` so a receiver without a hard drive can still run the server.

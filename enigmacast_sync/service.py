@@ -8,7 +8,7 @@ import secrets
 import time
 from pathlib import Path
 
-from enigmacast_sync.db import apply_record, backup, connect, pull, restore, token_hash
+from enigmacast_sync.db import apply_record, backup, compact, connect, pull, prune_changes, record_cursor, restore, token_hash
 from enigmacast_sync.p256 import verify
 from enigmacast_sync.secrets import master_key, open_secret, seal
 
@@ -278,10 +278,16 @@ def push(db, device: dict, body: dict) -> dict:
     return {"results": results}
 
 
-def sync_pull(db, device: dict, profile_id: str, cursor: int) -> dict:
+def sync_pull(db, device: dict, profile_id: str, cursor: int, limit: int = 500) -> dict:
     _allow_profile(device, profile_id, db)
-    nxt, changes = pull(db, [profile_id], cursor)
-    return {"cursor": nxt, "changes": changes}
+    # The incoming cursor is the last page this device says it applied; a response that
+    # never reached the client must remain available, so never record the returned cursor.
+    record_cursor(db, device["id"], profile_id, cursor)
+    nxt, changes = pull(db, [profile_id], cursor, limit)
+    removed = prune_changes(db)
+    if removed >= 1000:
+        compact(db)
+    return {"cursor": nxt, "changes": changes, "limit": limit}
 
 
 def make_backup(db, device: dict) -> dict:

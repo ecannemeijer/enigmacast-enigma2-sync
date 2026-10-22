@@ -3,7 +3,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE=$(mktemp -d)
 OUT=${1:-$ROOT/dist}
-VERSION=${VERSION:-0.2.5}
+VERSION=${VERSION:-0.2.6}
 PKG=enigmacast-sync
 PLUGIN="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync"
 OWIF="$STAGE/usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External"

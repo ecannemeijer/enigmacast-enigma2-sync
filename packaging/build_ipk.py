@@ -16,7 +16,7 @@ PKG = "enigmacast-sync"
 
 def main() -> None:
     import sys
-    version = os.environ.get("VERSION", "0.2.5")
+    version = os.environ.get("VERSION", "0.2.6")
     out = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist")
     out.mkdir(parents=True, exist_ok=True)
     stage = _stage(version)

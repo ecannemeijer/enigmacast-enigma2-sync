@@ -80,7 +80,8 @@ def make_handler(db):
                 query = parse_qs(parsed.query)
                 profile_id = (query.get("profileId") or [""])[0]
                 cursor = int((query.get("cursor") or ["0"])[0])
-                return self._json(200, sync_pull(db, device, profile_id, cursor))
+                limit = max(1, min(1000, int((query.get("limit") or ["500"])[0])))
+                return self._json(200, sync_pull(db, device, profile_id, cursor, limit))
             if path == "/api/v1/backups" and method == "POST":
                 return self._json(200, make_backup(db, device))
             if path == "/api/v1/status" and method == "GET":

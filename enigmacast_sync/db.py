@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS changes (
     change_id TEXT NOT NULL UNIQUE,
     device_id TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cursors (
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    seen_ms INTEGER NOT NULL,
+    PRIMARY KEY (device_id, profile_id)
+);
 """
 
 
@@ -115,17 +122,74 @@ def apply_record(db: sqlite3.Connection, profile_id: str, entity: str, record_ke
     return "accept"
 
 
-def pull(db: sqlite3.Connection, profile_ids: list[str], cursor: int) -> tuple[int, list[dict]]:
+def pull(db: sqlite3.Connection, profile_ids: list[str], cursor: int, limit: int | None = None) -> tuple[int, list[dict]]:
     if not profile_ids:
         return cursor, []
     marks = ",".join("?" for _ in profile_ids)
-    rows = db.execute(
-        f"SELECT * FROM changes WHERE rev>? AND profile_id IN ({marks}) ORDER BY rev",
-        (cursor, *profile_ids),
-    ).fetchall()
+    sql = f"SELECT * FROM changes WHERE rev>? AND profile_id IN ({marks}) ORDER BY rev"
+    params = [cursor, *profile_ids]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    rows = db.execute(sql, tuple(params)).fetchall()
     changes = [dict(row) for row in rows]
     nxt = changes[-1]["rev"] if changes else cursor
     return nxt, changes
+
+
+INACTIVE_CURSOR_MS = 90 * 24 * 60 * 60 * 1000
+KEEP_RECENT_CHANGES = 2_000
+
+
+def record_cursor(db: sqlite3.Connection, device_id: str, profile_id: str, cursor: int) -> None:
+    """Remember the cursor a client says it has applied. The requested cursor, not the
+    returned one, is the safe point: a response the client never processed must stay pullable."""
+    db.execute(
+        """INSERT INTO cursors (device_id, profile_id, cursor, seen_ms) VALUES (?,?,?,?)
+           ON CONFLICT(device_id, profile_id) DO UPDATE SET cursor=excluded.cursor, seen_ms=excluded.seen_ms""",
+        (device_id, profile_id, int(cursor), int(time.time() * 1000)),
+    )
+    db.commit()
+
+
+def prune_changes(db: sqlite3.Connection) -> int:
+    """Delete changes every active device already applied, keeping a small recent tail.
+    A client with no cursor blocks pruning for its profile; an abandoned device is ignored
+    after INACTIVE_CURSOR_MS so it cannot keep the database large forever."""
+    now = int(time.time() * 1000)
+    active = db.execute(
+        "SELECT c.profile_id, MIN(c.cursor) AS applied FROM cursors c "
+        "JOIN devices d ON d.id=c.device_id AND d.revoked=0 "
+        "WHERE c.seen_ms>? GROUP BY c.profile_id",
+        (now - INACTIVE_CURSOR_MS,),
+    ).fetchall()
+    deleted = 0
+    for row in active:
+        profile = row[0]
+        applied = int(row[1] or 0)
+        if applied <= 0:
+            continue
+        cutoff = min(applied, max(0, (db.execute(
+            "SELECT COALESCE(MAX(rev),0) FROM changes WHERE profile_id=?", (profile,)
+        ).fetchone()[0]) - KEEP_RECENT_CHANGES))
+        if cutoff <= 0:
+            continue
+        deleted += db.execute(
+            "DELETE FROM changes WHERE profile_id=? AND rev<=?", (profile, cutoff)
+        ).rowcount
+    db.commit()
+    return int(deleted or 0)
+
+
+def compact(db: sqlite3.Connection) -> None:
+    """Reclaim disk after a prune. Runs on maintenance, never while a pull is being served."""
+    try:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        db.commit()
+        db.execute("VACUUM")
+        db.commit()
+    except sqlite3.Error:
+        pass
 
 
 def backup(db_path: Path, key_path: Path, dest_dir: Path) -> Path:
