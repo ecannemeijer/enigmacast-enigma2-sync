@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+import socket
 import ssl
 import sys
 import time
@@ -42,15 +43,41 @@ def make_server(data: Path, host: str = "0.0.0.0", port: int = PORT, control_scr
     failures: dict[str, tuple[int, float]] = {}
     cpu = CpuSampler()
     handler = _handler(data, secret, secure, script, failures, cpu)
-    httpd = ThreadingHTTPServer((host, port), handler)
-    httpd.daemon_threads = True
+    context = None
     if secure:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certfile=str(cert), keyfile=str(key))
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-    _log(data, f"listening on {port} ({'https' if secure else 'http'})")
+    httpd = _DualProtocolServer((host, port), handler, context)
+    httpd.daemon_threads = True
+    _log(data, f"listening on {port} ({'https + http redirect' if secure else 'http'})")
     (data / "enigmacast-web.pid").write_text(str(os.getpid()), encoding="utf-8")
     return httpd
+
+
+class _DualProtocolServer(ThreadingHTTPServer):
+    """Accept both HTTPS and plain HTTP on 8766; plain HTTP is redirected in the handler."""
+
+    def __init__(self, server_address, handler, ssl_context: ssl.SSLContext | None):
+        self.ssl_context = ssl_context
+        super().__init__(server_address, handler)
+
+    def get_request(self):
+        sock, address = self.socket.accept()
+        if self.ssl_context is None:
+            return sock, address
+        try:
+            sock.settimeout(10)
+            first = sock.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return sock, address
+        finally:
+            try:
+                sock.settimeout(None)
+            except OSError:
+                pass
+        if first == b"\x16":
+            return self.ssl_context.wrap_socket(sock, server_side=True), address
+        return sock, address
 
 
 def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> None:
@@ -82,6 +109,17 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             _log(data, "%s %s" % (self.command, urlparse(self.path).path))
 
         def _route(self, method: str):
+            # A browser that types http://<receiver>:8766 must not get a reset. Send it to the
+            # HTTPS login instead; the sync API stays TLS-only.
+            if secure and not isinstance(self.request, ssl.SSLSocket):
+                host = self.headers.get("Host") or f"{self.server.server_address[0]}:{self.server.server_address[1]}"
+                self.send_response(301)
+                self.send_header("Location", f"https://{host}{self.path}")
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                return
             if not allowed(self.client_address[0]):
                 return self._text(403, "forbidden")
             parsed = urlparse(self.path)

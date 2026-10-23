@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8
+
+- De webdienst op 8766 accepteert nu zowel HTTPS als gewoon HTTP. Een browser die `http://<receiver>:8766` opent krijgt een redirect naar HTTPS in plaats van een lege/reset-verbinding.
+- De Sync API op 8740 blijft TLS-only.
+
 ## 0.2.7
 
 - De installer controleert nu `python3-sqlite3`. Op OpenATV-receivers zonder harde schijf, waar de data in `/etc/enigmacast-sync` staat, stopte de service eerder direct met `ModuleNotFoundError: No module named 'sqlite3'`; daardoor werd `cert.pem` nooit aangemaakt.
