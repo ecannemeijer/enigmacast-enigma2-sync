@@ -264,6 +264,65 @@ def get_playlist(db, device: dict) -> dict:
     }}
 
 
+PROVIDERS_ID = "iptv-providers"
+PROVIDER_FIELDS = ("id", "name", "kind", "m3uUrl", "server", "username", "password", "enabled", "sortOrder")
+MAX_PROVIDERS = 20
+
+
+def _clean_providers(value) -> list[dict]:
+    out = []
+    for raw in value if isinstance(value, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        provider = {key: raw.get(key, "") for key in PROVIDER_FIELDS}
+        provider["id"] = str(provider["id"])[:80]
+        provider["name"] = str(provider["name"])[:80]
+        provider["kind"] = "XTREAM" if str(provider["kind"]).upper() == "XTREAM" else "M3U"
+        provider["enabled"] = bool(raw.get("enabled", True))
+        try:
+            provider["sortOrder"] = int(raw.get("sortOrder", len(out)))
+        except (TypeError, ValueError):
+            provider["sortOrder"] = len(out)
+        if provider["id"]:
+            out.append(provider)
+        if len(out) >= MAX_PROVIDERS:
+            break
+    return out
+
+
+def put_iptv_providers(db, device: dict, body: dict) -> dict:
+    """The provider list for every paired device. Each provider's credentials stay sealed."""
+    change = str(body["changeId"])
+    updated = int(body["updatedMs"])
+    providers = _clean_providers(body.get("providers"))
+    sealed = seal(master_key(_dir(db) / "master.key"), json.dumps({"providers": providers}))
+    audience = json.dumps(body.get("audience") or [])
+    choice = apply_record(db, "*", "playlist", PROVIDERS_ID, "upsert", audience, updated, change, device["id"])
+    if choice == "accept":
+        db.execute(
+            """INSERT INTO playlist (id, audience, secret, updated_ms, change_id, deleted) VALUES (?,?,?,?,?,0)
+               ON CONFLICT(id) DO UPDATE SET audience=excluded.audience, secret=excluded.secret,
+                 updated_ms=excluded.updated_ms, change_id=excluded.change_id, deleted=0""",
+            (PROVIDERS_ID, audience, sealed, updated, change),
+        )
+    db.commit()
+    return {"result": choice}
+
+
+def get_iptv_providers(db, device: dict) -> dict:
+    """The provider list, decrypted for any paired device."""
+    del device
+    row = db.execute("SELECT * FROM playlist WHERE id=? AND deleted=0", (PROVIDERS_ID,)).fetchone()
+    if row is None:
+        return {"providers": [], "updatedMs": 0, "changeId": ""}
+    raw = json.loads(open_secret(master_key(_dir(db) / "master.key"), row["secret"]))
+    return {
+        "providers": _clean_providers(raw.get("providers")),
+        "updatedMs": row["updated_ms"],
+        "changeId": row["change_id"],
+    }
+
+
 def push(db, device: dict, body: dict) -> dict:
     results = []
     for change in body.get("changes") or []:

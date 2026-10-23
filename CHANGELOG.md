@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Meerdere IPTV-providers kunnen nu met de syncserver worden gedeeld via `GET/POST /api/v1/iptv/providers`.
+- De providerlijst wordt versleuteld op de ontvanger bewaard, inclusief naam, type, volgorde en aan/uit-status.
+- De bestaande enkele-playlist-API blijft werken voor oudere apps.
+
 ## 0.2.8
 
 - De webdienst op 8766 accepteert nu zowel HTTPS als gewoon HTTP. Een browser die `http://<receiver>:8766` opent krijgt een redirect naar HTTPS in plaats van een lege/reset-verbinding.

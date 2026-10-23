@@ -8,7 +8,8 @@ from enigmacast_sync.aes import decrypt, encrypt
 from enigmacast_sync.db import decide
 from enigmacast_sync.p256 import generate, sign, verify
 from enigmacast_sync.service import (
-    ApiError, authenticate, get_playlist, init_server, issue_pairing, join, open_db, pair, push, put_playlist, recover, revoke_device,
+    ApiError, authenticate, get_iptv_providers, get_playlist, init_server, issue_pairing, join, open_db, pair, push,
+    put_iptv_providers, put_playlist, recover, revoke_device,
 )
 from enigmacast_sync.storage import choose_data_dir
 
@@ -157,6 +158,28 @@ class ServerTests(unittest.TestCase):
         again = get_playlist(self.db, auth)["playlist"]
         self.assertEqual("https://list.example/tv.m3u", again["m3uUrl"])
         self.assertEqual("M3U", again["kind"])
+
+    def test_iptv_providers_roundtrip(self):
+        created = init_server(self.db)
+        _, public = generate()
+        admin = pair(self.db, {"code": created["pairingCode"], "name": "tv", "publicKey": base64.b64encode(public).decode()})
+        auth = {"id": admin["deviceId"], "role": "admin", "revoked": 0}
+        self.assertEqual([], get_iptv_providers(self.db, auth)["providers"])
+        stored = put_iptv_providers(self.db, auth, {
+            "changeId": "providers-1", "updatedMs": 10,
+            "providers": [
+                {"id": "a", "name": "Provider A", "kind": "M3U", "m3uUrl": "https://a.example/list.m3u", "enabled": True, "sortOrder": 0},
+                {"id": "b", "name": "Provider B", "kind": "XTREAM", "server": "http://b.example", "username": "u", "password": "p", "enabled": True, "sortOrder": 1},
+            ],
+        })
+        self.assertEqual("accept", stored["result"])
+        got = get_iptv_providers(self.db, auth)
+        self.assertEqual(2, len(got["providers"]))
+        self.assertEqual("Provider B", got["providers"][1]["name"])
+        self.assertEqual("p", got["providers"][1]["password"])
+        older = put_iptv_providers(self.db, auth, {"changeId": "providers-0", "updatedMs": 5, "providers": []})
+        self.assertEqual("reject", older["result"])
+        self.assertEqual(2, len(get_iptv_providers(self.db, auth)["providers"]))
 
     def test_p256_roundtrip(self):
         private, public = generate()
