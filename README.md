@@ -11,6 +11,8 @@ The database goes on a mounted disk (`/media/hdd`, then USB, then other disks). 
 
 The dashboard password starts as `admin` and is written once to `web-password-once` in the data directory. Change it on the Server page. An existing password hash is kept.
 
+The IPK depends on `python3-core`, `python3-sqlite3` and `openssl`. Some OpenATV images ship Python without the `sqlite3` module; without it the service exits before it can create `cert.pem`. The package installs the dependency automatically where the feed provides it.
+
 ## Run
 
 ```sh

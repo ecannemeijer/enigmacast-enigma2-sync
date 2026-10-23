@@ -16,7 +16,7 @@ PKG = "enigmacast-sync"
 
 def main() -> None:
     import sys
-    version = os.environ.get("VERSION", "0.2.6")
+    version = os.environ.get("VERSION", "0.2.7")
     out = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist")
     out.mkdir(parents=True, exist_ok=True)
     stage = _stage(version)
@@ -55,6 +55,7 @@ def _stage(version: str) -> dict[str, tuple[bytes, int]]:
     control = (
         f"Package: {PKG}\nVersion: {version}\nArchitecture: all\n"
         "Section: extra\nMaintainer: ecannemeijer\n"
+        "Depends: python3-core, python3-sqlite3, openssl\n"
         "Description: EnigmaCast sync API and web dashboard\n"
     ).encode()
     files["CONTROL/control"] = (control, 0o644)

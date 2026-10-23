@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- De installer controleert nu `python3-sqlite3`. Op OpenATV-receivers zonder harde schijf, waar de data in `/etc/enigmacast-sync` staat, stopte de service eerder direct met `ModuleNotFoundError: No module named 'sqlite3'`; daardoor werd `cert.pem` nooit aangemaakt.
+- Het IPK declareert `python3-core`, `python3-sqlite3` en `openssl` als dependencies.
+- De post-installatie stopt met een duidelijke melding als `sqlite3` ontbreekt, in plaats van een stille dood van de service.
+
 ## 0.2.6
 
 - `/api/v1/sync/pull` returns bounded pages (default 500, client asks 50) instead of the entire change history. A large single TLS response could be dropped with `BrokenPipe`/`SSL BAD_LENGTH`, so the TV never applied it.

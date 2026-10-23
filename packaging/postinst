@@ -16,6 +16,14 @@ ensure_user() {
 }
 
 ensure_user || exit 1
+# Some OpenATV images ship Python without sqlite3. The control file depends on
+# python3-sqlite3, but a forced local install can skip dependencies; fail clearly instead of
+# leaving a dead service and a missing certificate.
+if ! python3 -c 'import sqlite3, ssl' >/dev/null 2>&1; then
+    echo "enigmacast-sync: python3-sqlite3 ontbreekt op deze receiver" >&2
+    echo "Installeer python3-sqlite3 en probeer opnieuw." >&2
+    exit 1
+fi
 for init in enigmacast-sync enigmacast-web; do
     chmod 755 "/etc/init.d/$init"
     if command -v update-rc.d >/dev/null 2>&1; then
