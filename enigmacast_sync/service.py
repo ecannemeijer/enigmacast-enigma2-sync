@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from enigmacast_sync.db import apply_record, backup, compact, connect, pull, prune_changes, record_cursor, restore, token_hash
+from enigmacast_sync import SERVER_VERSION
 from enigmacast_sync.p256 import verify
 from enigmacast_sync.secrets import master_key, open_secret, seal
 
@@ -59,12 +60,17 @@ def init_server(db) -> dict:
 
 
 def health() -> dict:
-    return {"ok": True, "service": "enigmacast-sync"}
+    return {"ok": True, "service": "enigmacast-sync", "version": SERVER_VERSION}
+
+
+def version_info() -> dict:
+    """Unauthenticated: lets the app compare the running server with the latest release."""
+    return {"service": "enigmacast-sync", "version": SERVER_VERSION, "api": "v1", "paging": True}
 
 
 def server_info(db) -> dict:
     admins = db.execute("SELECT COUNT(*) AS n FROM devices WHERE role='admin' AND revoked=0").fetchone()["n"]
-    return {"api": "v1", "port": 8740, "adminDevices": admins, "initialized": _meta(db, "initialized") == "1"}
+    return {"api": "v1", "port": 8740, "version": SERVER_VERSION, "adminDevices": admins, "initialized": _meta(db, "initialized") == "1"}
 
 
 def join(db, body: dict) -> dict:
@@ -337,16 +343,29 @@ def push(db, device: dict, body: dict) -> dict:
     return {"results": results}
 
 
-def sync_pull(db, device: dict, profile_id: str, cursor: int, limit: int = 500) -> dict:
+MAX_PULL_LIMIT = 1000
+DEFAULT_PULL_LIMIT = 500
+
+
+def sync_pull(db, device: dict, profile_id: str, cursor: int, limit: int = DEFAULT_PULL_LIMIT) -> dict:
     _allow_profile(device, profile_id, db)
+    limit = max(1, min(MAX_PULL_LIMIT, int(limit)))
     # The incoming cursor is the last page this device says it applied; a response that
     # never reached the client must remain available, so never record the returned cursor.
     record_cursor(db, device["id"], profile_id, cursor)
-    nxt, changes = pull(db, [profile_id], cursor, limit)
+    db.commit()
+    nxt, changes, more = pull(db, [profile_id], cursor, limit)
+    # Pruning and VACUUM run in [maintain] on a timer, never while a pull is being answered:
+    # on a slow receiver a VACUUM took long enough for the TV to give up on the response.
+    return {"cursor": nxt, "changes": changes, "limit": limit, "more": more}
+
+
+def maintain(db) -> int:
+    """Background housekeeping: drop history every active device applied, then compact."""
     removed = prune_changes(db)
     if removed >= 1000:
         compact(db)
-    return {"cursor": nxt, "changes": changes, "limit": limit}
+    return removed
 
 
 def make_backup(db, device: dict) -> dict:

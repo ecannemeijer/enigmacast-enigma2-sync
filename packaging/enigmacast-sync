@@ -14,12 +14,28 @@ is_mount() {
 }
 
 pick_dir() {
+    # Must match enigmacast_sync.storage.choose_data_dir.
+    for d in /media/hdd /media/usb /media/mmc /media/cf; do
+        if is_mount "$d" && [ -w "$d" ] && [ -f "$d/enigmacast-sync/sync.db" ]; then
+            echo "$d/enigmacast-sync"
+            return 0
+        fi
+    done
     for d in /media/hdd /media/usb /media/mmc /media/cf; do
         if is_mount "$d" && [ -w "$d" ]; then
             echo "$d/enigmacast-sync"
             return 0
         fi
     done
+    # 0.2.4 and older used /media/<x> without checking the mount: keep that database.
+    if [ ! -f /etc/enigmacast-sync/sync.db ]; then
+        for d in /media/hdd /media/usb /media/mmc /media/cf; do
+            if [ -f "$d/enigmacast-sync/sync.db" ] && [ -w "$d/enigmacast-sync" ]; then
+                echo "$d/enigmacast-sync"
+                return 0
+            fi
+        done
+    fi
     echo /etc/enigmacast-sync
 }
 

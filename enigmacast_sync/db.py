@@ -122,19 +122,29 @@ def apply_record(db: sqlite3.Connection, profile_id: str, entity: str, record_ke
     return "accept"
 
 
-def pull(db: sqlite3.Connection, profile_ids: list[str], cursor: int, limit: int | None = None) -> tuple[int, list[dict]]:
+PULL_COLUMNS = "rev, profile_id, entity, record_key, op, payload, updated_ms, change_id"
+
+
+def pull(db: sqlite3.Connection, profile_ids: list[str], cursor: int, limit: int | None = None) -> tuple[int, list[dict], bool]:
+    """One page of changes after [cursor], oldest first.
+
+    Returns (next cursor, changes, more). One extra row is read to tell whether another page
+    follows, so a client never has to guess from the page size."""
     if not profile_ids:
-        return cursor, []
+        return cursor, [], False
     marks = ",".join("?" for _ in profile_ids)
-    sql = f"SELECT * FROM changes WHERE rev>? AND profile_id IN ({marks}) ORDER BY rev"
+    sql = f"SELECT {PULL_COLUMNS} FROM changes WHERE rev>? AND profile_id IN ({marks}) ORDER BY rev"
     params = [cursor, *profile_ids]
     if limit is not None:
         sql += " LIMIT ?"
-        params.append(int(limit))
+        params.append(int(limit) + 1)
     rows = db.execute(sql, tuple(params)).fetchall()
+    more = limit is not None and len(rows) > int(limit)
+    if more:
+        rows = rows[: int(limit)]
     changes = [dict(row) for row in rows]
     nxt = changes[-1]["rev"] if changes else cursor
-    return nxt, changes
+    return nxt, changes, more
 
 
 INACTIVE_CURSOR_MS = 90 * 24 * 60 * 60 * 1000

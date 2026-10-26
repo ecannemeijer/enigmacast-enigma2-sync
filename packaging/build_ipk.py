@@ -16,7 +16,7 @@ PKG = "enigmacast-sync"
 
 def main() -> None:
     import sys
-    version = os.environ.get("VERSION", "0.3.0")
+    version = os.environ.get("VERSION") or _package_version()
     out = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist")
     out.mkdir(parents=True, exist_ok=True)
     stage = _stage(version)
@@ -30,6 +30,13 @@ def main() -> None:
     target = out / f"{PKG}_{version}_all.ipk"
     target.write_bytes(payload)
     print(f"Wrote {target}")
+
+
+def _package_version() -> str:
+    """The version in enigmacast_sync/__init__.py, so the .ipk and /api/v1/version agree."""
+    import re
+    text = (ROOT / "enigmacast_sync" / "__init__.py").read_text(encoding="utf-8")
+    return re.search(r'__version__ = "([^"]+)"', text).group(1)
 
 
 def _stage(version: str) -> dict[str, tuple[bytes, int]]:

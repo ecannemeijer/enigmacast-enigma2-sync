@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Explicit server version: `SERVER_VERSION` in `enigmacast_sync/__init__.py`, reported by `GET /api/v1/health` (`"version"`), the new unauthenticated `GET /api/v1/version` and `/api/v1/server`. The app compares it with the latest release and offers an update.
+- `/api/v1/sync/pull` answers `"more": true|false` (one extra row is read), and only the columns a client applies (no `device_id`).
+- Pruning and `VACUUM` no longer run inside a pull request; a background thread does it every 6 hours. A VACUUM on a slow receiver could stall the response long enough for the TV to drop it.
+- TLS handshake per connection in the worker thread (it ran in the accept loop: one slow client blocked every other one), 15 s handshake and 60 s socket timeouts, TLS `close_notify` before close.
+- Responses: compact ASCII JSON, `Content-Length` from the encoded bytes, `Connection: close`. The global lock covers only the database work, not writing the response, and a failed write no longer appends a second 500 response to the broken stream.
+- Data directory: a database left by 0.2.4 or older in an unmounted `/media/<x>/enigmacast-sync` folder is kept (those versions only checked that the folder existed), and a mounted disk that already holds `sync.db` wins. Upgrading from 0.2.4 keeps pairings, certificate and history.
+- The package version is taken from `enigmacast_sync/__init__.py` when `VERSION` is not set.
+
 ## 0.3.0
 
 - Meerdere IPTV-providers kunnen nu met de syncserver worden gedeeld via `GET/POST /api/v1/iptv/providers`.

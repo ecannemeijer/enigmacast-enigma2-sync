@@ -2,7 +2,7 @@
 
 The Sync API is unchanged. The web dashboard on port 8766 is a separate process and does not add routes here.
 
-All paths are under `/api/v1`. Except `health`, `server`, `pair` and `recover`, every call needs:
+All paths are under `/api/v1`. Except `health`, `version`, `server`, `pair` and `recover`, every call needs:
 
 - `Authorization: Bearer <token>`
 - `X-Timestamp` unix milliseconds
@@ -11,7 +11,8 @@ All paths are under `/api/v1`. Except `health`, `server`, `pair` and `recover`, 
 
 | Method | Path | Who | Purpose |
 | --- | --- | --- | --- |
-| GET | `/health` | anyone | Process is up |
+| GET | `/health` | anyone | Process is up; `{"ok":true,"service":"enigmacast-sync","version":"0.3.1"}` |
+| GET | `/version` | anyone | `{"service","version","api","paging"}`. Servers before 0.3.1 return 404 here and no `version` in `/health` |
 | GET | `/server` | anyone | Version marker and whether an admin exists |
 | POST | `/pair` | pairing code | First unused code becomes the only admin; later codes become members |
 | POST | `/recover` | recovery code | Revokes every device and returns one new pairing code |
@@ -29,4 +30,4 @@ All paths are under `/api/v1`. Except `health`, `server`, `pair` and `recover`, 
 
 A push body is `{"changes":[{"profileId","entity","key","op","payload","updatedMs","changeId"}]}`. `op` is `upsert` or `delete`. The same `changeId` is a replay. An older `updatedMs` is rejected.
 
-A pull response is `{"cursor":<next>,"changes":[...],"limit":<page>}`. Call it again with the returned cursor while a full page was returned, so a client never asks for the whole history at once. The server records the **requested** cursor per device and prunes only changes that all active devices already applied, keeping a recent tail. Devices unseen for 90 days no longer block pruning. A new or very old device needs a full resync; the current API has no snapshot endpoint yet.
+A pull response is `{"cursor":<next>,"changes":[...],"limit":<page>,"more":<bool>}` (`limit` is clamped to 1–1000, default 500; `more` since 0.3.1). Each change carries its `rev`; `cursor` is the last `rev` in the page. Call it again with the returned cursor while `more` is true, so a client never asks for the whole history at once. The server records the **requested** cursor per device and prunes only changes that all active devices already applied, keeping a recent tail. Devices unseen for 90 days no longer block pruning. A new or very old device needs a full resync; the current API has no snapshot endpoint yet.
