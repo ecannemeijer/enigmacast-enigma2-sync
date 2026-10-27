@@ -13,6 +13,15 @@ The dashboard password starts as `admin` and is written once to `web-password-on
 
 The IPK depends on `python3-core`, `python3-sqlite3` and `openssl`. Some OpenATV images ship Python without the `sqlite3` module; without it the service exits before it can create `cert.pem`. The package installs the dependency automatically where the feed provides it.
 
+## Full backup and restore
+
+Open **Serverbeheer** in the dashboard. **Volledige back-up downloaden** creates one `.tar.gz` with `sync.db`, `master.key`, `cert.pem`, `key.pem` and `web-auth.json`. Keep that file private: it contains the keys that protect IPTV passwords and the TLS identity.
+
+**Terugzetten** accepts the same archive. The server validates every file first, makes a safety backup in the data directory, stops the Sync API, restores the files and starts the API again. The Web Manager restarts so the restored certificate and dashboard password take effect.
+
+A full backup is the right file to keep before an OpenATV flash or reinstall. A database-only backup does not include the certificate; restoring only that makes every TV and Companion pair again.
+
+
 ## Run
 
 ```sh

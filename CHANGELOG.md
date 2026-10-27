@@ -1,8 +1,14 @@
-# Changelog
+﻿# Changelog
+
+## 0.3.3
+
+- Full backup/restore in the dashboard: database, `master.key`, TLS certificate/key and the dashboard password hash in one archive.
+- Upload validation rejects unknown files, path traversal, oversized archives, corrupt databases and mismatched certificates before replacing anything.
+- A safety backup is created automatically before a restore; the Sync API is stopped/started around it and the Web Manager restarts so the restored certificate takes effect.
 
 ## 0.3.2
 
-- Web manager (8766): login works on the first try again. The handler cached the parsed request body per connection, and with HTTP/1.1 keep-alive one handler serves every request on that connection. A second POST (a retry after a typo, a login after logout, any second dashboard action) reused the first body and left its own body unread in the socket, where it was read as the next request line: `501 Unsupported method ('csrf=…&password=…GET')` for `/static/app.css`, so the page came back without styling, logout answered `403 csrf`, and a second dashboard action repeated the first one.
+- Web manager (8766): login works on the first try again. The handler cached the parsed request body per connection, and with HTTP/1.1 keep-alive one handler serves every request on that connection. A second POST (a retry after a typo, a login after logout, any second dashboard action) reused the first body and left its own body unread in the socket, where it was read as the next request line: `501 Unsupported method ('csrf=â€¦&password=â€¦GET')` for `/static/app.css`, so the page came back without styling, logout answered `403 csrf`, and a second dashboard action repeated the first one.
 - Every request now reads exactly `Content-Length` bytes first, before any redirect, 401/403, CSRF or static answer. Bodies above 64 KiB get `413`, an invalid length `400`, chunked bodies `411`; those answers close the connection without reading the body. PUT/DELETE/PATCH get `405` after their body is read.
 - `web.log` logs method, path and status only. An unknown method or a garbled request line is logged as `-`, never its content (0.3.1 could write a leftover login body, including the password, to `web.log`). `web.log` is rotated to `web.log.1` above 256 KiB.
 - Less memory on small receivers: idle keep-alive connections are closed after 30 s, the TLS sniff and handshake run in the worker thread with a 10 s limit (one silent client no longer blocks the accept loop), dropped connections no longer print tracebacks, and the log viewer reads only the last 64 KiB of a log instead of the whole file.
@@ -43,7 +49,7 @@
 - `/api/v1/sync/pull` returns bounded pages (default 500, client asks 50) instead of the entire change history. A large single TLS response could be dropped with `BrokenPipe`/`SSL BAD_LENGTH`, so the TV never applied it.
 - Per-device/profile cursors are recorded when a client pulls. History already applied by every active device is pruned, keeping the newest 2,000 changes per profile. Devices unseen for 90 days no longer hold pruning back.
 - Large prunes compact the SQLite database with `VACUUM`, so removed history also releases disk space.
-- Added optional `limit` to `/api/v1/sync/pull` (`1`–`1000`).
+- Added optional `limit` to `/api/v1/sync/pull` (`1`â€“`1000`).
 
 ## 0.2.5
 

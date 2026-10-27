@@ -7,14 +7,17 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import ssl
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from enigmacast_sync import small_thread_stacks
+from enigmacast_sync.archive import ArchiveError, create_full_backup, restore_full_backup
 from enigmacast_sync.db import backup
 from enigmacast_sync.web import PORT
 from enigmacast_sync.web.auth import (
@@ -35,6 +38,9 @@ LOGS = {"sync": "sync.log", "web": "web.log"}
 # Forms and JSON actions of the dashboard are a few hundred bytes. Anything larger is refused
 # before it is read, so a client cannot make the receiver buffer a big upload.
 MAX_BODY = 64 * 1024
+# A full archive can be larger than a form, but it is still bounded so a malicious
+# client cannot make a low-memory receiver buffer an unlimited upload.
+RESTORE_MAX_BODY = 16 * 1024 * 1024
 # An idle keep-alive connection (browsers keep several open) frees its thread after this.
 IDLE_TIMEOUT_S = 30
 # The TLS / plain HTTP sniff and the handshake run in the worker thread with this limit.
@@ -44,16 +50,23 @@ LOG_MAX_BYTES = 256 * 1024
 METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"})
 
 
-def make_server(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> ThreadingHTTPServer:
+def make_server(
+    data: Path,
+    host: str = "0.0.0.0",
+    port: int = PORT,
+    control_script: Path | None = None,
+    web_control_script: Path | None = None,
+) -> ThreadingHTTPServer:
     data.mkdir(parents=True, exist_ok=True)
     ensure_password(data)
     secret = {"value": session_secret(data)}
     script = control_script or Path("/etc/init.d/enigmacast-sync")
+    web_script = web_control_script or Path("/etc/init.d/enigmacast-web")
     cert, key = data / "cert.pem", data / "key.pem"
     secure = cert.is_file() and key.is_file()
     failures: dict[str, tuple[int, float]] = {}
     cpu = CpuSampler()
-    handler = _handler(data, secret, secure, script, failures, cpu)
+    handler = _handler(data, secret, secure, script, web_script, failures, cpu)
     context = None
     if secure:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -117,7 +130,7 @@ def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: P
             pid.unlink(missing_ok=True)
 
 
-def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dict, cpu: CpuSampler):
+def _handler(data: Path, secret: dict, secure: bool, script: Path, web_script: Path, failures: dict, cpu: CpuSampler):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         timeout = IDLE_TIMEOUT_S
@@ -207,6 +220,10 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
                 return self._server_action()
             if path == "/api/backup" and method == "POST":
                 return self._backup()
+            if path == "/api/backup/full" and method == "GET":
+                return self._backup_full()
+            if path == "/api/restore" and method == "POST":
+                return self._restore()
             if path == "/api/password" and method == "POST":
                 return self._change_password()
             if path == "/api/logs" and method == "GET":
@@ -322,6 +339,53 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             _log(data, "database backup created")
             return self._json(200, {"path": str(target)})
 
+        def _backup_full(self):
+            try:
+                target = create_full_backup(data)
+            except (FileNotFoundError, OSError, ArchiveError) as exc:
+                _log(data, f"full backup failed: {exc}")
+                return self._json(409, {"error": "volledige back-up kon niet worden gemaakt"})
+            _log(data, "full backup downloaded")
+            return self._bytes(200, target.read_bytes(), "application/gzip", None, filename=target.name)
+
+        def _restore(self):
+            if not self._raw_body:
+                return self._json(400, {"error": "geen back-up ontvangen"})
+            upload = data / "backups" / f".restore-{os.getpid()}-{time.time_ns()}.tar.gz"
+            upload.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                upload.write_bytes(self._raw_body)
+                stop = run_control(script, "stop")
+                if stop != 0:
+                    return self._json(500, {"error": f"Sync API stoppen mislukt (code {stop})"})
+                result = restore_full_backup(upload, data)
+                start = run_control(script, "start")
+                if start != 0:
+                    _log(data, f"sync start after restore exit {start}")
+                _log(data, f"full backup restored: {', '.join(result['files'])}")
+                # The current web process still holds the old certificate and session secret.
+                # Restart it just after this response has been written.
+                timer = threading.Timer(1.5, self._restart_web)
+                timer.daemon = True
+                timer.start()
+                return self._json(200, {
+                    "restored": result["files"],
+                    "safety": result["safety"],
+                    "restarting": True,
+                })
+            except (ArchiveError, OSError, sqlite3.Error) as exc:
+                _log(data, f"full restore failed: {exc}")
+                run_control(script, "start")
+                return self._json(400, {"error": str(exc)})
+            finally:
+                upload.unlink(missing_ok=True)
+
+        def _restart_web(self):
+            try:
+                run_control(web_script, "restart")
+            except (OSError, ValueError) as exc:
+                _log(data, f"web restart after restore failed: {exc}")
+
         def _login_page(self, session: dict | None, message: str = "", status: int = 200):
             if session and session.get("auth") and not message:
                 return self._redirect("/overview")
@@ -397,7 +461,8 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             if not header.isdigit():
                 return self._refuse(400, "bad request")
             length = int(header)
-            if length > MAX_BODY:
+            limit = RESTORE_MAX_BODY if urlparse(self.path or "").path == "/api/restore" else MAX_BODY
+            if length > limit:
                 return self._refuse(413, "request too large")
             raw = self.rfile.read(length) if length else b""
             if len(raw) != length:
@@ -455,12 +520,14 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
         def _json(self, status: int, payload: dict, cookie: str | None = None):
             return self._bytes(status, json.dumps(payload).encode("utf-8"), "application/json", cookie)
 
-        def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None, close: bool = False):
+        def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None, close: bool = False, filename: str | None = None):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             if cookie:
                 self.send_header("Set-Cookie", cookie)
             if close:

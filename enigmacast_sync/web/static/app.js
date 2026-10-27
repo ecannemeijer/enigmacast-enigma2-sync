@@ -93,7 +93,13 @@
   if (page === "server") {
     main.innerHTML = '<section class="panel"><h2>Sync API</h2><p id="api-state" class="muted">Status laden…</p>' +
       '<div class="actions"><button data-action="start">Start</button><button data-action="stop">Stop</button><button data-action="restart">Restart</button>' +
-      '<button id="backup" class="ghost">Databaseback-up</button></div><p id="action-result" class="muted"></p></section>' +
+      '<button id="backup" class="ghost">Snelle databaseback-up</button></div><p id="action-result" class="muted"></p></section>' +
+      '<section class="panel"><h2>Volledige back-up</h2>' +
+      '<p class="muted">Bevat de database, master.key, het TLS-certificaat, de TLS-sleutel en het dashboardwachtwoord. Bewaar de download veilig: de archive bevat geheimen.</p>' +
+      '<div class="actions"><button id="backup-full">Volledige back-up downloaden</button>' +
+      '<input id="restore-file" type="file" accept=".gz,.tgz,application/gzip">' +
+      '<button id="restore-full" class="ghost">Terugzetten</button></div>' +
+      '<p id="full-result" class="muted"></p></section>' +
       '<section class="panel"><h2>Wachtwoord</h2><p id="password-hint" class="muted"></p>' +
       '<form id="password-form" class="password-form">' +
       '<label for="pw-current">Huidig wachtwoord</label><input id="pw-current" type="password" autocomplete="current-password" required>' +
@@ -131,6 +137,45 @@
         document.getElementById("action-result").textContent = "Back-up op de ontvanger: " + result.path;
       }).catch(function () {
         document.getElementById("action-result").textContent = "Back-up is niet gemaakt.";
+      });
+    });
+    document.getElementById("backup-full").addEventListener("click", function () {
+      window.location.assign("/api/backup/full");
+    });
+    document.getElementById("restore-full").addEventListener("click", function () {
+      var input = document.getElementById("restore-file");
+      var result = document.getElementById("full-result");
+      var file = input.files && input.files[0];
+      if (!file) {
+        result.textContent = "Kies eerst een .tar.gz-back-up.";
+        return;
+      }
+      if (!window.confirm("Hiermee worden database, sleutels, certificaat en dashboardwachtwoord vervangen. Eerst wordt automatisch een veiligheidsback-up gemaakt. Doorgaan?")) return;
+      result.textContent = "Back-up controleren en terugzetten…";
+      fetch("/api/restore", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/gzip",
+          "X-CSRF-Token": csrf,
+          "Accept": "application/json"
+        },
+        body: file
+      }).then(function (response) {
+        return response.text().then(function (text) {
+          var payload;
+          try {
+            payload = JSON.parse(text);
+          } catch (error) {
+            throw new Error("De server gaf geen geldig antwoord.");
+          }
+          if (!response.ok) throw new Error(payload.error || "Terugzetten mislukt.");
+          return payload;
+        });
+      }).then(function (payload) {
+        result.textContent = "Teruggezet. Veiligheidsback-up: " + payload.safety + ". De webpagina herstart; log opnieuw in.";
+        window.setTimeout(function () { window.location.assign("/login"); }, 5000);
+      }).catch(function (error) {
+        result.textContent = error.message || "Terugzetten is niet gelukt.";
       });
     });
     document.getElementById("password-form").addEventListener("submit", function (event) {

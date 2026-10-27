@@ -69,6 +69,19 @@ De pagina heeft vijf onderdelen:
 - **Apparaten**: naam, beheerder of client, laatste synchronisatie, of de koppeling nog geldt.
 - **Synchronisatie**: toegepaste wijzigingen. Geweigerde conflicten worden niet bewaard.
 
+### Volledige back-up en terugzetten
+
+Onder **Serverbeheer** staat **Volledige back-up**. De download bevat:
+
+- `sync.db` met profielen, apparaten en IPTV-providers;
+- `master.key` voor de versleutelde IPTV-wachtwoorden;
+- `cert.pem` en `key.pem` voor de vertrouwde TLS-verbinding;
+- `web-auth.json` met het dashboardwachtwoord.
+
+Bewaar de `.tar.gz` als een wachtwoord: hij bevat de privésleutel en de sleutel van de IPTV-gegevens. Zet hem niet in een openbare cloudmap.
+
+**Terugzetten** doet eerst een veiligheidsback-up, controleert daarna de archive en vervangt pas dan de bestanden. De Sync API wordt tijdens de restore gestopt en daarna gestart; de webpagina herstart en vraagt opnieuw om in te loggen. Dit is de back-up die je vóór een OpenATV-flash of een schone herinstallatie bewaart.
+
 De sessie blijft acht uur geldig.
 
 ## Wachtwoord

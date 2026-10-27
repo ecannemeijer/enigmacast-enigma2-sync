@@ -107,3 +107,11 @@ pre {
   .top { align-items: flex-start; gap: 0.8rem; }
   th:nth-child(n+5), td:nth-child(n+5) { display: none; }
 }
+
+.actions input[type="file"] {
+  background: var(--raised);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 0.5rem;
+  max-width: 100%;
+}
