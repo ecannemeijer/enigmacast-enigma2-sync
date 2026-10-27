@@ -271,11 +271,24 @@ def api_listening(port: int = 8740) -> bool:
         sock.close()
 
 
+TAIL_BYTES = 64 * 1024
+
+
 def tail(path: Path, limit: int = 200) -> list[str]:
-    if not path.is_file():
+    """The last lines of a log. Reads at most TAIL_BYTES from the end, not the whole file:
+    sync.log and web.log grow for months and the receiver has little free RAM."""
+    try:
+        with path.open("rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            start = max(0, size - TAIL_BYTES)
+            handle.seek(start)
+            raw = handle.read()
+    except OSError:
         return []
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
-    return [line for line in lines if not _sensitive(line)]
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    if start and lines:
+        lines = lines[1:]  # the first line is cut off
+    return [line for line in lines[-limit:] if not _sensitive(line)]
 
 
 def _profile_rows(db: sqlite3.Connection | None) -> list[dict]:

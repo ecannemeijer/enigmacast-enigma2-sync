@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- Web manager (8766): login works on the first try again. The handler cached the parsed request body per connection, and with HTTP/1.1 keep-alive one handler serves every request on that connection. A second POST (a retry after a typo, a login after logout, any second dashboard action) reused the first body and left its own body unread in the socket, where it was read as the next request line: `501 Unsupported method ('csrf=…&password=…GET')` for `/static/app.css`, so the page came back without styling, logout answered `403 csrf`, and a second dashboard action repeated the first one.
+- Every request now reads exactly `Content-Length` bytes first, before any redirect, 401/403, CSRF or static answer. Bodies above 64 KiB get `413`, an invalid length `400`, chunked bodies `411`; those answers close the connection without reading the body. PUT/DELETE/PATCH get `405` after their body is read.
+- `web.log` logs method, path and status only. An unknown method or a garbled request line is logged as `-`, never its content (0.3.1 could write a leftover login body, including the password, to `web.log`). `web.log` is rotated to `web.log.1` above 256 KiB.
+- Less memory on small receivers: idle keep-alive connections are closed after 30 s, the TLS sniff and handshake run in the worker thread with a 10 s limit (one silent client no longer blocks the accept loop), dropped connections no longer print tracebacks, and the log viewer reads only the last 64 KiB of a log instead of the whole file.
+- Sync API (8740): request bodies are capped at 4 MiB (`413`); a negative or invalid `Content-Length` gets `400` and chunked bodies `411` instead of a `500`. The API already closed the connection after every response, so it never had the keep-alive problem.
+
 ## 0.3.1
 
 - Explicit server version: `SERVER_VERSION` in `enigmacast_sync/__init__.py`, reported by `GET /api/v1/health` (`"version"`), the new unauthenticated `GET /api/v1/version` and `/api/v1/server`. The app compares it with the latest release and offers an update.

@@ -22,6 +22,9 @@ PORT = 8740
 # A client that stops reading (or never finishes its TLS handshake) frees its thread after this.
 SOCKET_TIMEOUT_S = 60
 HANDSHAKE_TIMEOUT_S = 15
+# A push is at most 100 changes. Bigger bodies are refused before they are read, so one bad or
+# hostile client cannot make the receiver buffer megabytes.
+MAX_BODY = 4 * 1024 * 1024
 MAINTENANCE_EVERY_S = 6 * 60 * 60
 
 
@@ -48,8 +51,7 @@ def make_handler(db, lock: threading.Lock | None = None):
         def _route(self, method: str):
             parsed = urlparse(self.path)
             try:
-                length = int(self.headers.get("Content-Length", "0") or 0)
-                raw = self.rfile.read(length) if length else b""
+                raw = self._read_body()
                 # Only the database work is serialised. Writing the response happens after the
                 # lock is released, so one slow TV can no longer stall every other request.
                 with lock:
@@ -59,6 +61,24 @@ def make_handler(db, lock: threading.Lock | None = None):
             except Exception:
                 status, payload = 500, {"error": "server error"}
             self._send(status, payload)
+
+        def _read_body(self) -> bytes:
+            # Every response closes the connection (HTTP/1.0), so an unread body can never be
+            # taken for the next request here; it only has to be bounded.
+            if self.headers.get("Transfer-Encoding"):
+                raise ApiError(411, "length required")
+            header = (self.headers.get("Content-Length") or "").strip()
+            if not header:
+                return b""
+            if not header.isdigit():
+                raise ApiError(400, "bad content-length")
+            length = int(header)
+            if length > MAX_BODY:
+                raise ApiError(413, "request too large")
+            raw = self.rfile.read(length) if length else b""
+            if len(raw) != length:
+                raise ApiError(400, "incomplete body")
+            return raw
 
         def _dispatch(self, method, parsed, raw):
             path = parsed.path

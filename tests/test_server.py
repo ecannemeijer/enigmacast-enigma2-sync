@@ -190,3 +190,37 @@ class ServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApiBodyLimitTests(unittest.TestCase):
+    def test_oversized_or_bad_body_is_refused_without_reading_it(self):
+        import socket
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        from enigmacast_sync.http_server import MAX_BODY, make_handler
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = open_db(Path(tmp))
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(db))
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            try:
+                cases = (
+                    (f"Content-Length: {MAX_BODY + 1}", 413),
+                    ("Content-Length: -1", 400),
+                    ("Content-Length: x", 400),
+                    ("Transfer-Encoding: chunked", 411),
+                )
+                for header, expected in cases:
+                    with socket.create_connection(httpd.server_address, timeout=10) as sock:
+                        sock.sendall(f"POST /api/v1/sync/push HTTP/1.1\r\nHost: x\r\n{header}\r\n\r\n".encode())
+                        reply = sock.makefile("rb").read()
+                    self.assertTrue(reply.startswith(f"HTTP/1.0 {expected} ".encode()), (header, reply[:60]))
+                    self.assertIn(b"Connection: close", reply)
+                with socket.create_connection(httpd.server_address, timeout=10) as sock:
+                    sock.sendall(b"GET /api/v1/health HTTP/1.1\r\nHost: x\r\n\r\n")
+                    self.assertTrue(sock.makefile("rb").read().startswith(b"HTTP/1.0 200 "))
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                db.close()

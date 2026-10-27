@@ -31,6 +31,16 @@ STATIC = Path(__file__).resolve().parent / "static"
 ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 PAGES = frozenset({"overview", "server", "profiles", "devices", "sync"})
 LOGS = {"sync": "sync.log", "web": "web.log"}
+# Forms and JSON actions of the dashboard are a few hundred bytes. Anything larger is refused
+# before it is read, so a client cannot make the receiver buffer a big upload.
+MAX_BODY = 64 * 1024
+# An idle keep-alive connection (browsers keep several open) frees its thread after this.
+IDLE_TIMEOUT_S = 30
+# The TLS / plain HTTP sniff and the handshake run in the worker thread with this limit.
+HANDSHAKE_TIMEOUT_S = 10
+# web.log is rotated to web.log.1 above this size, so it never fills the flash or the RAM of tail().
+LOG_MAX_BYTES = 256 * 1024
+METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"})
 
 
 def make_server(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> ThreadingHTTPServer:
@@ -61,23 +71,33 @@ class _DualProtocolServer(ThreadingHTTPServer):
         self.ssl_context = ssl_context
         super().__init__(server_address, handler)
 
-    def get_request(self):
-        sock, address = self.socket.accept()
+    def finish_request(self, request, client_address):
+        # Runs in the worker thread. Sniffing and the TLS handshake used to run in the accept
+        # loop (get_request), where one silent or slow client blocked every other browser for
+        # up to 10 s.
         if self.ssl_context is None:
-            return sock, address
+            return super().finish_request(request, client_address)
         try:
-            sock.settimeout(10)
-            first = sock.recv(1, socket.MSG_PEEK)
-        except OSError:
-            return sock, address
+            request.settimeout(HANDSHAKE_TIMEOUT_S)
+            first = request.recv(1, socket.MSG_PEEK)
+            if not first:
+                return None
+            if first == b"\x16":
+                request = self.ssl_context.wrap_socket(request, server_side=True)
+        except (OSError, ssl.SSLError):
+            return None
+        try:
+            return super().finish_request(request, client_address)
         finally:
-            try:
-                sock.settimeout(None)
-            except OSError:
-                pass
-        if first == b"\x16":
-            return self.ssl_context.wrap_socket(sock, server_side=True), address
-        return sock, address
+            if isinstance(request, ssl.SSLSocket):
+                try:
+                    request.close()
+                except OSError:
+                    pass
+
+    def handle_error(self, request, client_address):
+        # A browser that drops a connection is normal; never print a traceback per socket.
+        return
 
 
 def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> None:
@@ -98,6 +118,7 @@ def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: P
 def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dict, cpu: CpuSampler):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = IDLE_TIMEOUT_S
 
         def do_GET(self):
             self._route("GET")
@@ -105,10 +126,43 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
         def do_POST(self):
             self._route("POST")
 
+        def do_PUT(self):
+            self._route("PUT")
+
+        def do_DELETE(self):
+            self._route("DELETE")
+
+        def do_PATCH(self):
+            self._route("PATCH")
+
+        def log_request(self, code="-", size="-"):
+            self._log_line(str(getattr(code, "value", code)))
+
+        def log_error(self, fmt, *args):
+            # send_error() passes the reason, which for a garbled request line holds the raw
+            # line itself (it once held a login form body). Only the status is logged.
+            code = args[0] if args else "-"
+            self._log_line(str(getattr(code, "value", code)))
+
         def log_message(self, fmt, *args):
-            _log(data, "%s %s" % (self.command, urlparse(self.path).path))
+            self._log_line("-")
+
+        def _log_line(self, status: str):
+            # Never the query string, the body or an unknown method: those may carry secrets.
+            method = self.command if self.command in METHODS else "-"
+            path = urlparse(self.path or "").path if method != "-" else "-"
+            if not re.fullmatch(r"[A-Za-z0-9/._:-]{0,120}", path):
+                path = "-"
+            _log(data, f"{method} {path} {status}")
 
         def _route(self, method: str):
+            # One handler object serves every request of a keep-alive connection, so the body of
+            # this request must be read here, on every path, before anything is answered. A body
+            # left in the socket would be parsed as the next request line.
+            self._parsed_body = None
+            self._raw_body = b""
+            if not self._read_body():
+                return
             # A browser that types http://<receiver>:8766 must not get a reset. Send it to the
             # HTTPS login instead; the sync API stays TLS-only.
             if secure and not isinstance(self.request, ssl.SSLSocket):
@@ -125,9 +179,11 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             parsed = urlparse(self.path)
             path = parsed.path
             if path.startswith("/static/"):
+                if method != "GET":
+                    return self._text(405, "method not allowed")
                 return self._static(path[len("/static/"):])
-            if method == "POST":
-                self._body()
+            if method not in ("GET", "POST"):
+                return self._text(405, "method not allowed")
             session = read_session(secret["value"], cookie_value(self.headers.get("Cookie", "")))
             if path == "/login" and method == "GET":
                 return self._login_page(session)
@@ -289,6 +345,7 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             self.send_response(303)
             self.send_header("Location", "/overview")
             self.send_header("Set-Cookie", cookie_header(token, secure))
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -328,11 +385,35 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
                 return False
             return hmac.compare_digest(expected, supplied)
 
-        def _body(self) -> dict:
-            if hasattr(self, "_parsed_body"):
-                return self._parsed_body
-            length = int(self.headers.get("Content-Length", "0") or 0)
+        def _read_body(self) -> bool:
+            """Read exactly Content-Length bytes, or refuse and close the connection."""
+            if self.headers.get("Transfer-Encoding"):
+                return self._refuse(411, "length required")
+            header = (self.headers.get("Content-Length") or "").strip()
+            if not header:
+                return True
+            if not header.isdigit():
+                return self._refuse(400, "bad request")
+            length = int(header)
+            if length > MAX_BODY:
+                return self._refuse(413, "request too large")
             raw = self.rfile.read(length) if length else b""
+            if len(raw) != length:
+                self.close_connection = True
+                return False
+            self._raw_body = raw
+            return True
+
+        def _refuse(self, status: int, message: str) -> bool:
+            # The unread body is still in the socket: answer and close, never keep-alive.
+            self.close_connection = True
+            self._bytes(status, message.encode("utf-8"), "text/plain; charset=utf-8", None, close=True)
+            return False
+
+        def _body(self) -> dict:
+            if self._parsed_body is not None:
+                return self._parsed_body
+            raw = self._raw_body
             kind = self.headers.get("Content-Type", "")
             if "application/json" in kind:
                 try:
@@ -372,7 +453,7 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
         def _json(self, status: int, payload: dict, cookie: str | None = None):
             return self._bytes(status, json.dumps(payload).encode("utf-8"), "application/json", cookie)
 
-        def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None):
+        def _bytes(self, status: int, payload: bytes, content_type: str, cookie: str | None, close: bool = False):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
@@ -380,8 +461,11 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, failures: dic
             self.send_header("X-Content-Type-Options", "nosniff")
             if cookie:
                 self.send_header("Set-Cookie", cookie)
+            if close:
+                self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(payload)
+            if self.command != "HEAD":
+                self.wfile.write(payload)
 
     return Handler
 
@@ -417,6 +501,11 @@ def _log(data: Path, message: str) -> None:
     path = data / "logs" / "web.log"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if path.stat().st_size > LOG_MAX_BYTES:
+                os.replace(path, path.with_name("web.log.1"))
+        except FileNotFoundError:
+            pass
         with path.open("a", encoding="utf-8") as handle:
             handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + message + "\n")
     except OSError:

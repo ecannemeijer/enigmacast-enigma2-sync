@@ -9,9 +9,11 @@ All paths are under `/api/v1`. Except `health`, `version`, `server`, `pair` and 
 - `X-Nonce` unique for five minutes
 - `X-Signature` base64 DER ECDSA-SHA256 over `timestamp + "\n" + nonce + "\n" + METHOD + "\n" + path + "\n" + sha256(body)`
 
+A request body needs a `Content-Length` of at most 4 MiB (since 0.3.2): larger bodies get `413`, a missing or invalid length with chunked encoding `411`/`400`, and the body is not read.
+
 | Method | Path | Who | Purpose |
 | --- | --- | --- | --- |
-| GET | `/health` | anyone | Process is up; `{"ok":true,"service":"enigmacast-sync","version":"0.3.1"}` |
+| GET | `/health` | anyone | Process is up; `{"ok":true,"service":"enigmacast-sync","version":"0.3.2"}` |
 | GET | `/version` | anyone | `{"service","version","api","paging"}`. Servers before 0.3.1 return 404 here and no `version` in `/health` |
 | GET | `/server` | anyone | Version marker and whether an admin exists |
 | POST | `/pair` | pairing code | First unused code becomes the only admin; later codes become members |
