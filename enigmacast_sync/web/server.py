@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from enigmacast_sync import small_thread_stacks
-from enigmacast_sync.archive import ArchiveError, create_full_backup, restore_full_backup
+from enigmacast_sync.archive import ArchiveError, create_full_backup, open_bundle, restore_full_backup
 from enigmacast_sync.db import backup
 from enigmacast_sync.web import PORT
 from enigmacast_sync.web.auth import (
@@ -355,6 +355,13 @@ def _handler(data: Path, secret: dict, secure: bool, script: Path, web_script: P
             upload.parent.mkdir(parents=True, exist_ok=True)
             try:
                 upload.write_bytes(self._raw_body)
+                # Validate before taking the Sync API down. A typo or the wrong file must
+                # not interrupt the running server.
+                try:
+                    with open_bundle(upload):
+                        pass
+                except ArchiveError as exc:
+                    return self._json(400, {"error": str(exc)})
                 stop = run_control(script, "stop")
                 if stop != 0:
                     return self._json(500, {"error": f"Sync API stoppen mislukt (code {stop})"})
