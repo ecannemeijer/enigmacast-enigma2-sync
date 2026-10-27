@@ -1,0 +1,97 @@
+#!/bin/sh
+# EnigmaCast watchdog.
+#   watchdog            (cron, every minute) start the Sync API / Web Manager if they are not
+#                       running, e.g. after the OOM killer. A service stopped on purpose
+#                       (init script "stop", the dashboard Stop button) stays stopped.
+#   watchdog install    add the cron line to root's crontab (idempotent)
+#   watchdog remove     remove it again
+# CRONTABS overrides the crontab directory (tests).
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:$PATH
+export PATH
+SELF=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/watchdog
+MARKER="# enigmacast-sync watchdog"
+LINE="* * * * * [ -x $SELF ] && $SELF >/dev/null 2>&1 $MARKER"
+
+crontab_dir() {
+    if [ -n "$CRONTABS" ]; then
+        echo "$CRONTABS"
+    elif [ -d /etc/cron/crontabs ]; then
+        # OpenATV / OpenPLi: busybox crond runs with -c /etc/cron/crontabs.
+        echo /etc/cron/crontabs
+    elif [ -d /var/spool/cron/crontabs ]; then
+        echo /var/spool/cron/crontabs
+    else
+        echo /etc/cron/crontabs
+    fi
+}
+
+is_busybox_crond() {
+    bin=$(command -v crond 2>/dev/null) || return 1
+    case "$(readlink -f "$bin" 2>/dev/null)" in
+        *busybox*) return 0 ;;
+    esac
+    return 1
+}
+
+write_tab() {
+    # $1 = 1 to add the line, 0 to only remove it. Replaces the file in one rename, so the
+    # directory mtime changes and crond rereads it; other users' lines are kept.
+    dir=$(crontab_dir)
+    tab=$dir/root
+    mkdir -p "$dir" || return 1
+    tmp=$dir/.root.enigmacast.$$
+    if [ -f "$tab" ]; then
+        grep -v -F "$MARKER" "$tab" > "$tmp" || true
+    else
+        : > "$tmp"
+    fi
+    if [ "$1" = 1 ]; then
+        echo "$LINE" >> "$tmp"
+    elif [ ! -f "$tab" ]; then
+        rm -f "$tmp"
+        return 0
+    fi
+    if [ -f "$tab" ] && cmp -s "$tmp" "$tab"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$tab" || { rm -f "$tmp"; return 1; }
+    # Older busybox crond only rereads tables listed in cron.update. Never send it SIGHUP:
+    # busybox crond has no HUP handler and would exit.
+    if [ -z "$CRONTABS" ] && is_busybox_crond; then
+        echo root >> "$dir/cron.update"
+    fi
+    return 0
+}
+
+ensure_crond() {
+    [ -n "$CRONTABS" ] && return 0
+    pidof crond >/dev/null 2>&1 && return 0
+    for init in /etc/init.d/busybox-cron /etc/init.d/crond /etc/init.d/cronie; do
+        if [ -x "$init" ]; then
+            "$init" start >/dev/null 2>&1 || true
+            return 0
+        fi
+    done
+    echo "enigmacast-sync: crond draait niet; de watchdog werkt pas als cron actief is" >&2
+}
+
+case "$1" in
+install)
+    write_tab 1 && ensure_crond
+    ;;
+remove)
+    write_tab 0
+    ;;
+"")
+    for service in enigmacast-sync enigmacast-web; do
+        [ -x "/etc/init.d/$service" ] && "/etc/init.d/$service" watchdog
+    done
+    exit 0
+    ;;
+*)
+    echo "Usage: $0 [install|remove]"
+    exit 1
+    ;;
+esac

@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from enigmacast_sync import small_thread_stacks
 from enigmacast_sync.db import backup
 from enigmacast_sync.web import PORT
 from enigmacast_sync.web.auth import (
@@ -101,6 +102,7 @@ class _DualProtocolServer(ThreadingHTTPServer):
 
 
 def serve(data: Path, host: str = "0.0.0.0", port: int = PORT, control_script: Path | None = None) -> None:
+    small_thread_stacks()
     try:
         httpd = make_server(data, host, port, control_script)
     except OSError as exc:

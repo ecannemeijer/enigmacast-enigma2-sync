@@ -1,5 +1,15 @@
 #!/bin/sh
 # Never remove /media/*/enigmacast-sync. Pairing, profiles and the database stay.
+# The watchdog script is gone by now: remove the cron line here without it (same marker).
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    for dir in /etc/cron/crontabs /var/spool/cron/crontabs; do
+        tab=$dir/root
+        [ -f "$tab" ] && grep -q -F "# enigmacast-sync watchdog" "$tab" || continue
+        grep -v -F "# enigmacast-sync watchdog" "$tab" > "$tab.enigmacast.$$" || true
+        chmod 600 "$tab.enigmacast.$$"
+        mv -f "$tab.enigmacast.$$" "$tab"
+    done
+fi
 if [ "$1" = "remove" ] && command -v update-rc.d >/dev/null 2>&1; then
     update-rc.d enigmacast-web remove || true
     update-rc.d enigmacast-sync remove || true

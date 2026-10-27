@@ -16,7 +16,7 @@ from enigmacast_sync.service import (
     get_iptv_providers, get_playlist, make_backup, pair, push, put_iptv_providers, put_playlist,
     maintain, recover, require_admin, revoke_device, server_info, sync_pull, upsert_profile, version_info,
 )
-from enigmacast_sync import SERVER_VERSION
+from enigmacast_sync import SERVER_VERSION, small_thread_stacks
 
 PORT = 8740
 # A client that stops reading (or never finishes its TLS handshake) frees its thread after this.
@@ -209,6 +209,7 @@ class TlsThreadingServer(ThreadingHTTPServer):
 
 def serve(data_dir: Path, cert: Path, key: Path, host: str = "0.0.0.0", port: int = PORT):
     from enigmacast_sync.service import open_db
+    small_thread_stacks()
     db = open_db(data_dir)
     lock = threading.Lock()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

@@ -9,6 +9,13 @@ An upgrade replaces those files and restarts both services. It does not delete t
 - `/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/`
 - `/etc/init.d/enigmacast-sync` and `/etc/init.d/enigmacast-web`
 - `/usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/enigmacast.py`
+- one line in root's crontab (`/etc/cron/crontabs/root`), marked `# enigmacast-sync watchdog`
+
+## Watchdog and memory
+
+Since 0.3.2 the package adds a cron job that runs `EnigmaCastSync/watchdog` every minute. It calls `/etc/init.d/enigmacast-sync watchdog` and `/etc/init.d/enigmacast-web watchdog`, which start a service that is not running, for example after the kernel's OOM killer ended it, and log that in `sync.log` or `web.log`. A service stopped on purpose (`stop`, or **Stop** in the dashboard) stays stopped until `start`, `restart` or a reboot. Reinstalling or upgrading never adds a second line; `opkg remove` deletes it. By hand: `EnigmaCastSync/watchdog install` or `EnigmaCastSync/watchdog remove`. The watchdog needs `crond`; the installer starts `/etc/init.d/busybox-cron` if cron is not running.
+
+`sync-run` and `web-run` set `oom_score_adj` to 300 before starting Python. On a receiver that runs out of memory the kernel then ends a sync server before Enigma2, and the watchdog brings it back. Request threads use 256 KiB stacks, idle dashboard connections close after 30 s, `web.log` rotates at 256 KiB and `sync.log` at 1 MiB (when the Sync API starts), and the log viewer reads only the last 64 KiB of a log.
 
 Both services run as the system user `enigmacast`. The package creates that user and gives it the existing data directory. It does not edit satellite, OSCam, tuner, bouquet or streaming settings.
 

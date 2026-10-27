@@ -7,6 +7,9 @@
 - `web.log` logs method, path and status only. An unknown method or a garbled request line is logged as `-`, never its content (0.3.1 could write a leftover login body, including the password, to `web.log`). `web.log` is rotated to `web.log.1` above 256 KiB.
 - Less memory on small receivers: idle keep-alive connections are closed after 30 s, the TLS sniff and handshake run in the worker thread with a 10 s limit (one silent client no longer blocks the accept loop), dropped connections no longer print tracebacks, and the log viewer reads only the last 64 KiB of a log instead of the whole file.
 - Sync API (8740): request bodies are capped at 4 MiB (`413`); a negative or invalid `Content-Length` gets `400` and chunked bodies `411` instead of a `500`. The API already closed the connection after every response, so it never had the keep-alive problem.
+- Watchdog: the package adds one cron line (`# enigmacast-sync watchdog`, in `/etc/cron/crontabs/root`) that runs `EnigmaCastSync/watchdog` every minute. The new init script action `watchdog` starts the Sync API or the Web Manager when it is not running (e.g. killed by the OOM killer) and logs that. A service stopped on purpose (`stop`, dashboard **Stop**) is left alone until `start`/`restart`/reboot. Install, reinstall and upgrade keep exactly one line; `opkg remove` deletes it. crond is started if it was not running; it never gets a SIGHUP (busybox crond would exit).
+- `sync-run` and `web-run` set `oom_score_adj` to 300: when memory runs out the kernel ends a sync server before Enigma2, and the watchdog restarts it.
+- Request threads of both servers use 256 KiB stacks. `sync.log` is rotated to `sync.log.1` above 1 MiB when the Sync API starts.
 
 ## 0.3.1
 

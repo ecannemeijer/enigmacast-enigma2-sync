@@ -14,6 +14,7 @@ import urllib.request
 from http.cookiejar import CookieJar
 from pathlib import Path
 
+from enigmacast_sync import small_thread_stacks
 from enigmacast_sync.service import open_db
 from enigmacast_sync.web.auth import check_password, ensure_password, new_session, read_session, session_secret
 from enigmacast_sync.web.control import run
@@ -378,6 +379,9 @@ class KeepAliveTests(unittest.TestCase):
              "-out", str(self.data / "cert.pem"), "-days", "1", "-nodes", "-subj", "/CN=test"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        # Same 256 KiB thread stacks as on the receiver (serve() sets them): TLS must fit.
+        small_thread_stacks()
+        self.addCleanup(threading.stack_size, 0)
         port = self._start()
         # A silent client must not block the accept loop (the TLS sniff runs in the worker).
         idle = socket.create_connection(("127.0.0.1", port))

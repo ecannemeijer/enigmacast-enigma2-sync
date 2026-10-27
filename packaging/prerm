@@ -1,5 +1,10 @@
 #!/bin/sh
 # Stop both services. Leave the database where it is.
+# On removal drop the cron watchdog first, so it cannot start a server that is going away.
+# On upgrade the line stays; the new postinst rewrites it.
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    /usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/watchdog remove || true
+fi
 /etc/init.d/enigmacast-web stop || true
 /etc/init.d/enigmacast-sync stop || true
 if [ -f /var/run/enigmacast-sync.pid ]; then

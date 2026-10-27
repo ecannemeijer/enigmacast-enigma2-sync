@@ -119,6 +119,8 @@ Log in op de webpagina en open **Serverbeheer**. Vul het huidige wachtwoord in e
 /etc/init.d/enigmacast-web restart
 ```
 
+Sinds 0.3.2 controleert een cronregel (`# enigmacast-sync watchdog` in `/etc/cron/crontabs/root`) elke minuut of beide diensten draaien en start ze opnieuw als ze zijn weggevallen, bijvoorbeeld omdat de receiver geheugen tekort kwam. Een dienst die je zelf stopt (met `stop` of de knop **Stop** op de webpagina) blijft gestopt tot `start`, `restart` of een herstart van de receiver. Bij geheugentekort beëindigt Linux eerst de syncserver en niet Enigma2.
+
 Logs staan in `/media/hdd/enigmacast-sync/logs/sync.log` en `web.log`. Regels met een wachtwoord, token of koppelcode worden in de webpagina weggelaten.
 
 Is poort 8766 al in gebruik, dan start de webpagina niet en kiest ze geen andere poort. De melding staat in `web.log`.

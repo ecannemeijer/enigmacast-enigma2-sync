@@ -2,6 +2,8 @@
 # EnigmaCast Web Manager. Independent of the Sync API process.
 DAEMON=/usr/bin/python3
 PLUGIN=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync
+# cron runs the watchdog with a minimal PATH; start-stop-daemon lives in /sbin.
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:$PATH
 CMD=serve-web
 
 is_mount() {
@@ -40,8 +42,6 @@ pick_dir() {
 }
 
 prepare() {
-    DIR=$(pick_dir)
-    PID=$DIR/enigmacast-web.pid
     mkdir -p "$DIR/logs" "$DIR/backups"
     if [ "$(id -u)" -eq 0 ]; then
         id enigmacast >/dev/null 2>&1 && chown -R enigmacast "$DIR" 2>/dev/null || true
@@ -91,6 +91,18 @@ stop_matches() {
     done
 }
 
+any_running() {
+    # Any instance, also one started with another data directory (a disk mounted later).
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        cmd=$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null || true)
+        case "$cmd" in
+            *enigmacast_sync.cli*serve-web*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 launch() {
     id enigmacast >/dev/null 2>&1 || { echo "user enigmacast is missing"; exit 1; }
     if command -v start-stop-daemon >/dev/null 2>&1; then
@@ -101,25 +113,45 @@ launch() {
     exit 1
 }
 
-prepare
+DIR=$(pick_dir)
+PID=$DIR/enigmacast-web.pid
+# Written by "stop" (also the dashboard Stop button), removed by start/restart: the watchdog
+# leaves a service alone that was stopped on purpose. Reboot runs "start" and clears it.
+STOPPED=$DIR/enigmacast-web.stopped
 case "$1" in
 start)
+    prepare
+    rm -f "$STOPPED"
     running && exit 0
     rm -f "$PID"
     launch
     ;;
 stop)
+    prepare
+    touch "$STOPPED" 2>/dev/null || true
     stop_pid
     stop_matches
     ;;
 restart)
+    prepare
+    rm -f "$STOPPED"
     stop_pid
     stop_matches
     sleep 1
     launch
     ;;
+watchdog)
+    # Every minute from cron. Cheap when all is well: no mkdir/chown, only a /proc scan.
+    [ -f "$STOPPED" ] && exit 0
+    running && exit 0
+    any_running && exit 0
+    prepare
+    rm -f "$PID"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') watchdog: enigmacast-web was not running, starting it" >> "$DIR/logs/web.log" 2>/dev/null || true
+    launch
+    ;;
 *)
-    echo "Usage: $0 {start|stop|restart}"
+    echo "Usage: $0 {start|stop|restart|watchdog}"
     exit 1
     ;;
 esac

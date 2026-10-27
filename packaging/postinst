@@ -37,4 +37,7 @@ for d in /media/hdd /media/usb /media/mmc /media/cf /etc; do
 done
 /etc/init.d/enigmacast-sync restart || true
 /etc/init.d/enigmacast-web restart || true
+# Cron watchdog: restarts the servers within a minute when the OOM killer took them down.
+# Idempotent: an upgrade or reinstall replaces the line instead of adding a second one.
+/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/watchdog install || true
 exit 0

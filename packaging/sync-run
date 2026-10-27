@@ -1,3 +1,7 @@
 #!/bin/sh
 export PYTHONPATH=/usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync
+# When memory runs out, let the kernel pick this server before enigma2 (0 by default, the GUI
+# must survive); the cron watchdog starts it again within a minute. Raising the score needs
+# no privileges; ignore kernels without the file. /proc/self is this shell, which exec keeps.
+{ echo 300 > /proc/self/oom_score_adj; } 2>/dev/null || true
 exec /usr/bin/python3 -m enigmacast_sync.cli --data-dir "$1" serve

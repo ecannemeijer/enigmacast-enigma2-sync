@@ -50,7 +50,7 @@ def _stage(version: str) -> dict[str, tuple[bytes, int]]:
     files["usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/plugin.py"] = (
         (ROOT / "plugin" / "plugin.py").read_bytes(), 0o644,
     )
-    for name in ("sync-run", "web-run"):
+    for name in ("sync-run", "web-run", "watchdog"):
         files[f"usr/lib/enigma2/python/Plugins/Extensions/EnigmaCastSync/{name}"] = (
             (ROOT / "packaging" / name).read_bytes().replace(b"\r\n", b"\n"), 0o755,
         )
