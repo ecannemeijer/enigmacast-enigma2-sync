@@ -2,6 +2,8 @@
 
 ## 0.3.3
 
+- No single owner any more: every paired TV (and every device paired with a code) gets the `admin` role and may list and revoke devices, issue pairing codes, read `/status` and make or restore backups. A revoked device still gets `403`. A TV that joins again is upgraded to `admin`, so a reinstalled TV no longer loses management.
+- `GET /api/v1/backups` lists the backups in `<data>/backups`; `POST /api/v1/backups/restore` (`{"folder": ...}`) restores one of them. Only folders directly in `<data>/backups` are accepted. The snapshot is written into the open database with SQLite's backup API (never copied over the open file), a safety backup goes to `backups/before-restore`, and the Sync API restarts two seconds after the answer so a restored `master.key` is loaded.
 - Full backup/restore in the dashboard: database, `master.key`, TLS certificate/key and the dashboard password hash in one archive.
 - Upload validation rejects unknown files, path traversal, oversized archives, corrupt databases and mismatched certificates before replacing anything.
 - A safety backup is created automatically before a restore; the Sync API is stopped/started around it and the Web Manager restarts so the restored certificate takes effect.

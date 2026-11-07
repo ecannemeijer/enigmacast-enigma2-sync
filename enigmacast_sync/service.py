@@ -74,7 +74,7 @@ def server_info(db) -> dict:
 
 
 def join(db, body: dict) -> dict:
-    """A TV running EnigmaCast joins without a pairing code. The first one is the only admin."""
+    """A TV running EnigmaCast joins without a pairing code. Every paired TV may manage the server."""
     name = str(body.get("name", "EnigmaCast"))[:64]
     pubkey = _b64(body.get("publicKey", ""))
     if not pubkey:
@@ -85,9 +85,10 @@ def join(db, body: dict) -> dict:
     if existing is not None:
         db.execute("UPDATE devices SET token_hash=?, name=? WHERE id=?", (token_hash(token), name, existing["id"]))
         db.commit()
-        return {"deviceId": existing["id"], "token": token, "role": existing["role"]}
-    admins = db.execute("SELECT COUNT(*) AS n FROM devices WHERE role='admin' AND revoked=0").fetchone()["n"]
-    role = "admin" if admins == 0 else "member"
+        db.execute("UPDATE devices SET role='admin' WHERE id=?", (existing["id"],))
+        db.commit()
+        return {"deviceId": existing["id"], "token": token, "role": "admin"}
+    role = "admin"
     device_id = secrets.token_hex(16)
     db.execute(
         "INSERT INTO devices (id, name, pubkey, token_hash, role, revoked, created_ms) VALUES (?,?,?,?,?,0,?)",
@@ -111,8 +112,7 @@ def pair(db, body: dict) -> dict:
     if row is None:
         raise ApiError(401, "pairing code rejected")
     db.execute("UPDATE pairing SET used=1 WHERE code_hash=?", (row["code_hash"],))
-    admins = db.execute("SELECT COUNT(*) AS n FROM devices WHERE role='admin' AND revoked=0").fetchone()["n"]
-    role = "admin" if admins == 0 else "member"
+    role = "admin"
     device_id = secrets.token_hex(16)
     token = secrets.token_urlsafe(32)
     db.execute(
@@ -168,8 +168,9 @@ def authenticate(db, headers: dict, method: str, path: str, body: bytes) -> dict
 
 
 def require_admin(device: dict) -> None:
-    if device.get("role") != "admin" or device.get("revoked"):
-        raise ApiError(403, "admin only")
+    """Any paired, not revoked device may manage the server: there is no single owner."""
+    if device.get("revoked"):
+        raise ApiError(403, "device revoked")
 
 
 def issue_pairing(db, device: dict) -> dict:
@@ -375,11 +376,62 @@ def make_backup(db, device: dict) -> dict:
     return {"path": str(target)}
 
 
+def list_backups(db, device: dict) -> dict:
+    require_admin(device)
+    root = _dir(db) / "backups"
+    folders = sorted((p for p in root.glob("enigmacast-sync-*") if (p / "sync.db").is_file()), reverse=True) if root.is_dir() else []
+    return {"backups": [str(p) for p in folders]}
+
+
 def restore_backup(db, device: dict, folder: str) -> dict:
+    """Restores a backup made by POST /api/v1/backups into the open database.
+
+    The database is never copied over while it is open: the snapshot is written into the live
+    connection with SQLite's backup API (the caller holds the API lock), after a safety backup.
+    The Sync API is restarted shortly after the answer so a restored master.key is loaded.
+    """
+    import sqlite3
+
     require_admin(device)
     data = _dir(db)
-    restore(Path(folder), data / "sync.db", data / "master.key")
-    return {"restored": folder}
+    root = (data / "backups").resolve()
+    target = Path(folder).resolve()
+    if target.parent != root or not (target / "sync.db").is_file():
+        raise ApiError(400, "unknown backup")
+    db.commit()
+    # Own folder: a backup made in the same second would have the same name.
+    safety = backup(data / "sync.db", data / "master.key", data / "backups" / "before-restore")
+    source = sqlite3.connect(str(target / "sync.db"))
+    try:
+        source.backup(db)
+    finally:
+        source.close()
+    _set_meta(db, "data_dir", str(data))
+    db.commit()
+    key = target / "master.key"
+    if key.is_file():
+        restore_key = data / "master.key"
+        import shutil
+        shutil.copy2(key, restore_key)
+        try:
+            restore_key.chmod(0o600)
+        except OSError:
+            pass
+    _restart_later()
+    return {"restored": str(target), "safetyBackup": str(safety), "restarting": True}
+
+
+def _restart_later(script: str = "/etc/init.d/enigmacast-sync") -> None:
+    """Restarts the Sync API two seconds from now, after this answer was sent. No shell input."""
+    import subprocess
+
+    if not Path(script).is_file():
+        return
+    try:
+        subprocess.Popen(["/bin/sh", "-c", f"sleep 2; exec {script} restart"], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
 
 
 def _allow_profile(device: dict, profile_id: str, db) -> None:

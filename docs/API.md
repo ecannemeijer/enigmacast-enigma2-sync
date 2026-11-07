@@ -16,18 +16,20 @@ A request body needs a `Content-Length` of at most 4 MiB (since 0.3.2): larger b
 | GET | `/health` | anyone | Process is up; `{"ok":true,"service":"enigmacast-sync","version":"0.3.2"}` |
 | GET | `/version` | anyone | `{"service","version","api","paging"}`. Servers before 0.3.1 return 404 here and no `version` in `/health` |
 | GET | `/server` | anyone | Version marker and whether an admin exists |
-| POST | `/pair` | pairing code | First unused code becomes the only admin; later codes become members |
+| POST | `/pair` | pairing code | Pairs a device with a code (Companion); every paired device is `admin` |
 | POST | `/recover` | recovery code | Revokes every device and returns one new pairing code |
-| POST | `/pairing` | admin | New member pairing code |
-| GET | `/devices` | admin | Device list without keys |
-| POST | `/devices/revoke` | admin | Revoke another device |
+| POST | `/pairing` | any paired device | New pairing code |
+| GET | `/devices` | any paired device | Device list without keys |
+| POST | `/devices/revoke` | any paired device | Revoke another device |
 | POST | `/devices/profiles` | admin | Assign profile uuids to a member |
 | POST | `/profiles` | admin or assigned | Create or update a profile |
 | GET | `/playlists` | any paired device | The one IPTV login (M3U or Xtream), not tied to a profile |
 | POST | `/playlists` | any paired device | Store that login when it is newer; the password is sealed |
 | POST | `/sync/push` | admin or assigned | Apply changes that are newer |
 | GET | `/sync/pull?profileId&cursor&limit` | admin or assigned | Up to `limit` changes after the cursor; repeat with the returned cursor |
-| POST | `/backups` | admin | Snapshot the database and the key file |
+| POST | `/backups` | any paired device | Snapshot the database and the key file |
+| GET | `/backups` | any paired device | List backup folders |
+| POST | `/backups/restore` | any paired device | Restore a listed backup into the open database; the API restarts after 2 s |
 | GET | `/status` | admin | Same facts as `/server`, admin only |
 
 A push body is `{"changes":[{"profileId","entity","key","op","payload","updatedMs","changeId"}]}`. `op` is `upsert` or `delete`. The same `changeId` is a replay. An older `updatedMs` is rejected.

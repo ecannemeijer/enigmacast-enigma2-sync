@@ -37,7 +37,7 @@ class ServerTests(unittest.TestCase):
         self.db.close()
         self.tmp.cleanup()
 
-    def test_first_device_is_only_admin(self):
+    def test_every_paired_device_may_manage(self):
         created = init_server(self.db)
         private, public = generate()
         first = pair(self.db, {"code": created["pairingCode"], "name": "tv", "publicKey": base64.b64encode(public).decode()})
@@ -45,9 +45,10 @@ class ServerTests(unittest.TestCase):
         issued = issue_pairing(self.db, {"id": first["deviceId"], "role": "admin", "revoked": 0})
         second_key = generate()
         second = pair(self.db, {"code": issued["pairingCode"], "name": "phone", "publicKey": base64.b64encode(second_key[1]).decode()})
-        self.assertEqual("member", second["role"])
+        self.assertEqual("admin", second["role"])
+        self.assertIn("pairingCode", issue_pairing(self.db, {"id": second["deviceId"], "role": "admin", "revoked": 0}))
         with self.assertRaises(ApiError):
-            issue_pairing(self.db, {"id": second["deviceId"], "role": "member", "revoked": 0})
+            issue_pairing(self.db, {"id": second["deviceId"], "role": "admin", "revoked": 1})
 
     def test_join_needs_no_pairing_code(self):
         init_server(self.db)
@@ -56,7 +57,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual("admin", first["role"])
         _, public2 = generate()
         second = join(self.db, {"name": "bedroom", "publicKey": base64.b64encode(public2).decode()})
-        self.assertEqual("member", second["role"])
+        self.assertEqual("admin", second["role"])
         again = join(self.db, {"name": "living-room", "publicKey": base64.b64encode(public).decode()})
         self.assertEqual(first["deviceId"], again["deviceId"])
         self.assertEqual("admin", again["role"])
@@ -105,14 +106,31 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             authenticate(self.db, headers, "GET", "/api/v1/devices", body)
 
-    def test_member_cannot_revoke(self):
+    def test_any_device_can_revoke_another_but_revoked_cannot(self):
         created = init_server(self.db)
         _, public = generate()
         admin = pair(self.db, {"code": created["pairingCode"], "name": "tv", "publicKey": base64.b64encode(public).decode()})
         issued = issue_pairing(self.db, {"id": admin["deviceId"], "role": "admin", "revoked": 0})
-        member = pair(self.db, {"code": issued["pairingCode"], "name": "other", "publicKey": base64.b64encode(public).decode()})
+        other = pair(self.db, {"code": issued["pairingCode"], "name": "other", "publicKey": base64.b64encode(public).decode()})
+        revoke_device(self.db, {"id": other["deviceId"], "role": "admin", "revoked": 0}, admin["deviceId"])
         with self.assertRaises(ApiError):
-            revoke_device(self.db, {"id": member["deviceId"], "role": "member", "revoked": 0}, admin["deviceId"])
+            revoke_device(self.db, {"id": admin["deviceId"], "role": "admin", "revoked": 1}, other["deviceId"])
+
+    def test_list_and_restore_backup_into_open_database(self):
+        from enigmacast_sync.service import list_backups, make_backup, restore_backup
+        _, public = generate()
+        tv = join(self.db, {"name": "tv", "publicKey": base64.b64encode(public).decode()})
+        auth = {"id": tv["deviceId"], "role": "admin", "revoked": 0}
+        made = make_backup(self.db, auth)["path"]
+        self.assertIn(made, list_backups(self.db, auth)["backups"])
+        _, public2 = generate()
+        join(self.db, {"name": "later", "publicKey": base64.b64encode(public2).decode()})
+        result = restore_backup(self.db, auth, made)
+        self.assertTrue(result["restarting"])
+        names = [r["name"] for r in self.db.execute("SELECT name FROM devices").fetchall()]
+        self.assertEqual(["tv"], names)
+        with self.assertRaises(ApiError):
+            restore_backup(self.db, auth, "/etc")
 
     def test_conflict_matches_app_rule(self):
         self.assertEqual("accept", decide(1000, "a", 2000, "b"))

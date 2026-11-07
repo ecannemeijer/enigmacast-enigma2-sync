@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from enigmacast_sync.service import (
     ApiError, assign_profiles, authenticate, health, issue_pairing, join, list_devices, list_profiles,
-    get_iptv_providers, get_playlist, make_backup, pair, push, put_iptv_providers, put_playlist,
+    get_iptv_providers, get_playlist, list_backups, make_backup, restore_backup, pair, push, put_iptv_providers, put_playlist,
     maintain, recover, require_admin, revoke_device, server_info, sync_pull, upsert_profile, version_info,
 )
 from enigmacast_sync import SERVER_VERSION, small_thread_stacks
@@ -127,6 +127,10 @@ def make_handler(db, lock: threading.Lock | None = None):
                 return (200, sync_pull(db, device, profile_id, cursor, limit))
             if path == "/api/v1/backups" and method == "POST":
                 return (200, make_backup(db, device))
+            if path == "/api/v1/backups" and method == "GET":
+                return (200, list_backups(db, device))
+            if path == "/api/v1/backups/restore" and method == "POST":
+                return (200, restore_backup(db, device, str(body.get("folder", ""))))
             if path == "/api/v1/status" and method == "GET":
                 require_admin(device)
                 return (200, server_info(db))
